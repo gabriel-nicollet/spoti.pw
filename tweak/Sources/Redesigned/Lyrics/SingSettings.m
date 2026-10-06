@@ -17,7 +17,7 @@ static NSString *aboutSize(void) {
 }
 
 static NSString *footer(void) {
-    return [NSString stringWithFormat:@"Sing turns the vocals of the song playing down to sing over, from the microphone in its lyrics. "
+    return [NSString stringWithFormat:@"Sing controls the song from the microphone in its lyrics. At 100 percent it leaves the mix unchanged; below 100 percent it reduces the vocals and overall level, and above 100 percent it takes the instrumental out until 110 percent is vocals only. "
             "It works on iOS 27 only. Its voice model, %@, is downloaded once and runs only on this iPhone. "
             "Vocals only plays the singing alone, with the instrumental taken out, and the microphone's slider has no say "
             "while it is on. The switches and the download apply straight away.", aboutSize()];
@@ -111,9 +111,6 @@ static SGModSection *karaokeSection(void) {
     if (!SGSingSupported()) return SGNotedSection(@"Karaoke", @[unavailableRow()], footer());
     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
-    SGModRow *vocalsOnly = SGOptionRow(@"Vocals only", @"The singing alone, no instrumental", SGRKeySingVocalsOnly);
-    vocalsOnly.changed = ^(BOOL on) { SGRSingApplyVocalsOnly(); };
-
     SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
     model.progress = ^double {
         return SGSingModelCurrentState() == SGSingModelDownloading ? (double)SGSingModelReceived() / SGSingModelSize() : -1;
@@ -134,7 +131,7 @@ static SGModSection *karaokeSection(void) {
         SGSingModelState state = SGSingModelCurrentState();
         return state == SGSingModelInstalled || (state == SGSingModelMissing && SGSingModelReceived() > 0);
     };
-    return SGNotedSection(@"Karaoke", @[sing, vocalsOnly, model, download, cancel, remove], footer());
+    return SGNotedSection(@"Karaoke", @[sing, model, download, cancel, remove], footer());
 }
 
 UIViewController *SGRKaraokeSettingsPage(void) {
