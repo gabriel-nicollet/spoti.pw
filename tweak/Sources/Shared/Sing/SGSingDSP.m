@@ -15,13 +15,16 @@ static void ramp(SGSingMixer *m, float to, float instrumentalTo, double seconds)
 static void apply(SGSingMixer *m, float level, bool vocalsOnly) {
     (void)vocalsOnly;
     float value = SGSingClampLevel(level);
-    float instrumental = value <= 1 ? 1 : 1 - (value - 1) / 0.1f;
-    float vocal = value <= 1 ? value : 1 + (value - 1) / 0.1f;
+    float instrumental = value <= 1 ? value : value * (1 - (value - 1) / 0.1f);
+    float vocal = value <= 1 ? value * value : value;
     ramp(m, vocal, instrumental, kLevelRampSeconds);
 }
 
 void SGSingMixerInit(SGSingMixer *m, double rate, float level) {
-    *m = (SGSingMixer){.gain = gain(level), .targetGain = gain(level), .instrumental = 1, .instrumentalTarget = 1,
+    float value = SGSingClampLevel(level);
+    float instrumental = value <= 1 ? value : value * (1 - (value - 1) / 0.1f);
+    float vocal = value <= 1 ? value * value : value;
+    *m = (SGSingMixer){.gain = vocal, .targetGain = vocal, .instrumental = instrumental, .instrumentalTarget = instrumental,
                       .sampleRate = isfinite(rate) && rate >= 8000 && rate <= 192000 ? rate : 44100};
 }
 void SGSingMixerSetLevel(SGSingMixer *m, float level) { apply(m, level, m->vocalsOnly); }
@@ -38,9 +41,7 @@ void SGSingMixerProcess(SGSingMixer *m, const float *original, const float *voca
             size_t at = (size_t)i * 2 + c;
             float source = isfinite(original[at]) ? original[at] : 0;
             float vocal = isfinite(vocals[at]) ? vocals[at] : 0;
-            // With the instrumental whole this is the original formula exactly, so a bypass or a full level returns the
-            // original sample for sample; only vocals only (or the ramp into it) takes the second form.
-            float value = m->instrumental == 1 ? source - (1 - m->gain) * vocal : m->instrumental * (source - vocal) + m->gain * vocal;
+            float value = m->instrumental * (source - vocal) + m->gain * vocal;
             out[at] = fmaxf(-1, fminf(1, value)); // bounded peak limiter, no per-stem normalization
         }
     }
