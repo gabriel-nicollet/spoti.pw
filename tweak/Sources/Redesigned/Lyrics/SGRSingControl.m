@@ -106,8 +106,8 @@ static SGRSingLook lookOf(SGSingState state) {
 - (void)setValue:(float)value {
     _value = SGSingClampLevel(value);
     // Rounded end labels must mean the actual endpoint, including subpixel touch coordinates.
-    if (_value < SGSingMinimumVocalLevel + 0.005f) _value = SGSingMinimumVocalLevel;
-    if (_value > 0.995f) _value = 1;
+    if (_value < 0.005f) _value = 0;
+    if (_value > 1.095f) _value = 1.1f;
 }
 - (void)accessibilityIncrement {
     if (!self.enabled) return;
@@ -250,7 +250,7 @@ static SGRSingLook lookOf(SGSingState state) {
     _fill.backgroundColor = [UIColor colorWithWhite:1 alpha:kFillWhite];
     _slider = [SGRVocalSlider new];
     _slider.accessibilityLabel = @"Vocal volume";
-    _slider.accessibilityHint = @"Original vocals at the top, 20 percent at the bottom";
+    _slider.accessibilityHint = @"0 percent is silent, 100 percent is the original mix, 110 percent is vocals only";
     _slider.accessibilityIdentifier = @"sing.vocalLevel";
     [_slider addTarget:self action:@selector(changed) forControlEvents:UIControlEventValueChanged];
     // The capsule draws on and off itself: a custom button, so UIKit adds no highlight or selected look.
@@ -313,12 +313,13 @@ static SGRSingLook lookOf(SGSingState state) {
 - (void)describe {
     SGSingState state = _shown;
     SGRSingLook look = lookOf(state);
-    BOOL original = _slider.value >= 1;
-    _slider.accessibilityValue = original ? @"Original" : [NSString stringWithFormat:@"%.0f percent", _slider.value * 100];
+    BOOL original = fabsf(_slider.value - 1) < 0.005f;
+    BOOL vocalsOnly = _slider.value >= 1.095f;
+    _slider.accessibilityValue = vocalsOnly ? @"Vocals only" : original ? @"Original mix" : [NSString stringWithFormat:@"%.0f percent", _slider.value * 100];
     _button.accessibilityLabel = @"Sing";
     _button.accessibilityValue = state == SGSingPreparing ? @"Preparing Sing" : state == SGSingRecovering ? @"Restoring Sing"
         : state == SGSingDraining ? @"Turning Sing off" : state == SGSingFailed ? @"Sing stopped"
-        : look.on ? (original ? @"On, original vocals" : [NSString stringWithFormat:@"On, %.0f percent vocals", _slider.value * 100])
+        : look.on ? (vocalsOnly ? @"On, vocals only" : original ? @"On, original mix" : [NSString stringWithFormat:@"On, %.0f percent", _slider.value * 100])
         : @"Off";
     _button.accessibilityHint = state == SGSingPreparing ? @"Tap to cancel." : state == SGSingDraining ? @"Tap to turn Sing back on."
         : state == SGSingFailed ? @"Tap to hear why Sing stopped."
