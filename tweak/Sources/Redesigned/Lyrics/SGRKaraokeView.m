@@ -221,7 +221,9 @@ static const CGFloat kSecondShare = 0.67, kThirdShare = 0.54;
         SGRLyricsText text = order[place].integerValue;
         if ((text == SGRLyricsTextPronunciation && !pronunciation) || (text == SGRLyricsTextTranslation && !translation)) continue;
         CGFloat points = shown.count ? sizes[place] : size;
-        UIFont *font = [UIFont systemFontOfSize:points weight:text == SGRLyricsTextTranslation ? UIFontWeightSemibold : UIFontWeightBold];
+        CGFloat styleWeight = SGRLyricsStyleFontWeight();
+        CGFloat weight = text == SGRLyricsTextTranslation ? MIN(styleWeight, UIFontWeightSemibold) : styleWeight;
+        UIFont *font = [UIFont systemFontOfSize:points weight:weight];
         if (text == SGRLyricsTextLyrics) _lyrics = font;
         else if (text == SGRLyricsTextPronunciation) _pronunciation = font;
         else _translation = font;
@@ -1423,6 +1425,7 @@ typedef struct {
 // new ones crossfade over them where they were, so nothing blinks and nothing is lost of the place.
 - (void)restyle {
     [self offerExtras];
+    _fontSize = SGRLyricsStyleFontSize();
     if (!_lines || !_tops || _builtWidth <= 0) return;   // the next build picks the style up
     SGRKaraokeStyle *style = [self styleNow];
     NSArray<SGKaraokeLine *> *lines = _lines;

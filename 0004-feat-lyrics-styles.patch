@@ -1,0 +1,208 @@
+diff --git a/tweak/Sources/App/Pages.m b/tweak/Sources/App/Pages.m
+index 7076f51..d42f832 100644
+--- a/tweak/Sources/App/Pages.m
++++ b/tweak/Sources/App/Pages.m
+@@ -67,7 +67,7 @@ UIViewController *SGLyricsSettingsPage(void) {
+     if (!redesigned) [more insertObject:SGGlassLyricsRow() atIndex:0];
+     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObject:SGLyricsSourcesSection(redesigned)];
+     if (redesigned) {
+-        [sections addObject:SGSection(@"Display", @[SGLyricsWordTimingRow(), SGRLyricsTextSizesRow(), SGRLyricsLandscapeRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
++        [sections addObject:SGSection(@"Display", @[SGRLyricsStylePreviewRow(), SGLyricsWordTimingRow(), SGRLyricsStyleRow(), SGRLyricsStyleTuneRow(), SGRLyricsTextSizesRow(), SGRLyricsLandscapeRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
+     }
+     [sections addObject:SGSection(nil, more)];
+     return [[SGModPage alloc] initWithTitle:@"Lyrics" intro:SGRestartNote sections:sections footer:nil];
+diff --git a/tweak/Sources/Redesigned/Lyrics/LyricsText.h b/tweak/Sources/Redesigned/Lyrics/LyricsText.h
+index 470a299..fa87239 100644
+--- a/tweak/Sources/Redesigned/Lyrics/LyricsText.h
++++ b/tweak/Sources/Redesigned/Lyrics/LyricsText.h
+@@ -28,5 +28,16 @@ void SGRSetLyricsTextShown(SGRLyricsText text, BOOL shown);
+ // LyricsTextSettings.m: the Lyrics page's row for the order, which opens a list of the three to drag.
+ @class SGModRow;
+ SGModRow *SGRLyricsTextSizesRow(void);
++
++// Lyrics appearance: preset and fine-tuning values used by SGRKaraokeView.
++#define SGRKeyLyricsStyle @"spotifyglass.redesign.lyricsStyle"
++#define SGRKeyLyricsStyleFontSize @"spotifyglass.redesign.lyricsStyleFontSize"
++#define SGRKeyLyricsStyleFontWeight @"spotifyglass.redesign.lyricsStyleFontWeight"
++
++CGFloat SGRLyricsStyleFontSize(void);
++CGFloat SGRLyricsStyleFontWeight(void);
++SGModRow *SGRLyricsStyleRow(void);
++SGModRow *SGRLyricsStyleTuneRow(void);
++SGModRow *SGRLyricsStylePreviewRow(void);
+ // Landscape lyrics' switch (LandscapeLyrics.h): the full screen lyrics page turns with the phone.
+ SGModRow *SGRLyricsLandscapeRow(void);
+diff --git a/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m b/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
+index b837cb6..b785f9e 100644
+--- a/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
++++ b/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
+@@ -100,3 +100,146 @@ SGModRow *SGRLyricsLandscapeRow(void) {
+                "Rotation lock in Control Center still decides whether the phone turns at all.";
+     return row;
+ }
++
++
++
++#pragma mark - Lyrics style preview
++
++static const CGFloat kLyricsStylePreviewHeight = 180.0;
++
++@interface SGRLyricsStylePreview : UIView
++@end
++
++@implementation SGRLyricsStylePreview
++
++- (instancetype)initWithFrame:(CGRect)frame {
++    if (!(self = [super initWithFrame:frame])) return nil;
++    self.backgroundColor = UIColor.blackColor;
++    self.layer.cornerRadius = 24.0;
++    self.clipsToBounds = YES;
++    [NSNotificationCenter.defaultCenter addObserver:self
++                                             selector:@selector(styleDidChange:)
++                                                 name:SGRLyricsTextDidChangeNotification
++                                               object:nil];
++    return self;
++}
++
++- (void)dealloc {
++    [NSNotificationCenter.defaultCenter removeObserver:self];
++}
++
++- (void)styleDidChange:(NSNotification *)notification {
++    [self setNeedsDisplay];
++}
++
++- (void)drawRect:(CGRect)rect {
++    CGFloat size = SGRLyricsStyleFontSize();
++    CGFloat weight = SGRLyricsStyleFontWeight();
++
++    UIFont *current = [UIFont systemFontOfSize:size weight:weight];
++    UIFont *next = [UIFont systemFontOfSize:size * 0.67 weight:weight];
++
++    NSDictionary *currentAttributes = @{
++        NSFontAttributeName: current,
++        NSForegroundColorAttributeName: UIColor.whiteColor
++    };
++    NSDictionary *nextAttributes = @{
++        NSFontAttributeName: next,
++        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]
++    };
++
++    NSString *currentText = @"This is your lyric";
++    NSString *nextText = @"A live preview of the style";
++
++    CGRect currentRect = CGRectMake(22.0, 48.0, rect.size.width - 44.0, size + 12.0);
++    CGRect nextRect = CGRectMake(22.0, 48.0 + size + 20.0, rect.size.width - 44.0, size * 0.67 + 12.0);
++
++    [currentText drawInRect:currentRect withAttributes:currentAttributes];
++    [nextText drawInRect:nextRect withAttributes:nextAttributes];
++}
++
++@end
++
++#pragma mark - Lyrics styles
++
++static CGFloat SGRLyricsStyleDefaultFontSize(void) {
++    return 30.0;
++}
++
++static CGFloat SGRLyricsStyleDefaultFontWeight(void) {
++    return UIFontWeightBold;
++}
++
++CGFloat SGRLyricsStyleFontSize(void) {
++    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleFontSize];
++    return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultFontSize();
++}
++
++CGFloat SGRLyricsStyleFontWeight(void) {
++    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleFontWeight];
++    return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultFontWeight();
++}
++
++static void SGRSetLyricsStylePreset(NSInteger preset) {
++    CGFloat size = 30.0;
++    CGFloat weight = UIFontWeightBold;
++
++    switch (preset) {
++        case 1: // Subtle
++            size = 27.0;
++            weight = UIFontWeightRegular;
++            break;
++        case 2: // Bold
++            size = 33.0;
++            weight = UIFontWeightBlack;
++            break;
++        default: // Default
++            break;
++    }
++
++    [NSUserDefaults.standardUserDefaults setDouble:size forKey:SGRKeyLyricsStyleFontSize];
++    [NSUserDefaults.standardUserDefaults setDouble:weight forKey:SGRKeyLyricsStyleFontWeight];
++    [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
++}
++
++SGModRow *SGRLyricsStyleRow(void) {
++    SGModRow *row = SGChoiceRow(@"Lyrics style", @"Choose the overall appearance", SGRKeyLyricsStyle,
++                                @[@"Default", @"Subtle", @"Bold"], 0);
++    row.chosen = ^(NSInteger index) {
++        [NSUserDefaults.standardUserDefaults setInteger:index forKey:SGRKeyLyricsStyle];
++        SGRSetLyricsStylePreset(index);
++    };
++    return row;
++}
++
++SGModRow *SGRLyricsStylePreviewRow(void) {
++    return SGViewRow([SGRLyricsStylePreview new], kLyricsStylePreviewHeight);
++}
++
++SGModRow *SGRLyricsStyleTuneRow(void) {
++    SGModRow *row = SGPageRow(@"Fine-tune style", ^{
++        SGModPage *page = [[SGModPage alloc] initWithTitle:@"Fine-tune style"
++                                                      intro:@"Adjust the lyrics appearance. Changes apply immediately."
++                                                   sections:@[
++            SGSection(nil, @[
++                SGSliderRow(@"Size", @"Overall lyric size", 20.0, 44.0, 1.0,
++                            ^double { return SGRLyricsStyleFontSize(); },
++                            ^(double value) {
++                                [NSUserDefaults.standardUserDefaults setDouble:value forKey:SGRKeyLyricsStyleFontSize];
++                                [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
++                            },
++                            ^NSString *(double value) { return [NSString stringWithFormat:@"%.0f pt", value]; }),
++
++                SGSliderRow(@"Weight", @"Font weight", UIFontWeightUltraLight, UIFontWeightBlack, 0.05,
++                            ^double { return SGRLyricsStyleFontWeight(); },
++                            ^(double value) {
++                                [NSUserDefaults.standardUserDefaults setDouble:value forKey:SGRKeyLyricsStyleFontWeight];
++                                [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
++                            },
++                            ^NSString *(double value) { return [NSString stringWithFormat:@"%.2f", value]; })
++            ])
++        ] footer:nil];
++        return page;
++    });
++    return row;
++}
+diff --git a/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m b/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
+index 088a17b..98ab6b0 100644
+--- a/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
++++ b/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
+@@ -221,7 +221,9 @@ static const CGFloat kSecondShare = 0.67, kThirdShare = 0.54;
+         SGRLyricsText text = order[place].integerValue;
+         if ((text == SGRLyricsTextPronunciation && !pronunciation) || (text == SGRLyricsTextTranslation && !translation)) continue;
+         CGFloat points = shown.count ? sizes[place] : size;
+-        UIFont *font = [UIFont systemFontOfSize:points weight:text == SGRLyricsTextTranslation ? UIFontWeightSemibold : UIFontWeightBold];
++        CGFloat styleWeight = SGRLyricsStyleFontWeight();
++        CGFloat weight = text == SGRLyricsTextTranslation ? MIN(styleWeight, UIFontWeightSemibold) : styleWeight;
++        UIFont *font = [UIFont systemFontOfSize:points weight:weight];
+         if (text == SGRLyricsTextLyrics) _lyrics = font;
+         else if (text == SGRLyricsTextPronunciation) _pronunciation = font;
+         else _translation = font;
+@@ -1423,6 +1425,7 @@ typedef struct {
+ // new ones crossfade over them where they were, so nothing blinks and nothing is lost of the place.
+ - (void)restyle {
+     [self offerExtras];
++    _fontSize = SGRLyricsStyleFontSize();
+     if (!_lines || !_tops || _builtWidth <= 0) return;   // the next build picks the style up
+     SGRKaraokeStyle *style = [self styleNow];
+     NSArray<SGKaraokeLine *> *lines = _lines;

@@ -28,5 +28,16 @@ void SGRSetLyricsTextShown(SGRLyricsText text, BOOL shown);
 // LyricsTextSettings.m: the Lyrics page's row for the order, which opens a list of the three to drag.
 @class SGModRow;
 SGModRow *SGRLyricsTextSizesRow(void);
+
+// Lyrics appearance: preset and fine-tuning values used by SGRKaraokeView.
+#define SGRKeyLyricsStyle @"spotifyglass.redesign.lyricsStyle"
+#define SGRKeyLyricsStyleFontSize @"spotifyglass.redesign.lyricsStyleFontSize"
+#define SGRKeyLyricsStyleFontWeight @"spotifyglass.redesign.lyricsStyleFontWeight"
+
+CGFloat SGRLyricsStyleFontSize(void);
+CGFloat SGRLyricsStyleFontWeight(void);
+SGModRow *SGRLyricsStyleRow(void);
+SGModRow *SGRLyricsStyleTuneRow(void);
+SGModRow *SGRLyricsStylePreviewRow(void);
 // Landscape lyrics' switch (LandscapeLyrics.h): the full screen lyrics page turns with the phone.
 SGModRow *SGRLyricsLandscapeRow(void);
