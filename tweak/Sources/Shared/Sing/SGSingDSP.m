@@ -3,7 +3,6 @@
 
 static const double kLevelRampSeconds = 0.030, kBypassRampSeconds = 0.120;
 
-static float gain(float level) { float value = SGSingClampLevel(level); return value * value; }
 static void ramp(SGSingMixer *m, float to, float instrumentalTo, double seconds) {
     m->targetGain = to;
     m->instrumentalTarget = instrumentalTo;
@@ -11,12 +10,16 @@ static void ramp(SGSingMixer *m, float to, float instrumentalTo, double seconds)
     m->step = (to - m->gain) / m->remaining;
     m->instrumentalStep = (instrumentalTo - m->instrumental) / m->remaining;
 }
-// Where the gains go for a level and a mode: vocals only is the vocals at full and no instrumental.
+// 0% is silent, 100% is the untouched mix. From 100% to 110% the instrumental
+// crossfades out while the vocal stem rises slightly with the overall level.
 static void apply(SGSingMixer *m, float level, bool vocalsOnly) {
-    m->vocalsOnly = vocalsOnly;
-    float target = vocalsOnly ? 1 : gain(level), instrumental = vocalsOnly ? 0 : 1;
-    if (target != m->targetGain || instrumental != m->instrumentalTarget) ramp(m, target, instrumental, kLevelRampSeconds);
+    (void)vocalsOnly;
+    float value = SGSingClampLevel(level);
+    float instrumental = value <= 1 ? 1 : 1 - (value - 1) / 0.1f;
+    float vocal = value <= 1 ? value : 1 + (value - 1) / 0.1f;
+    ramp(m, vocal, instrumental, kLevelRampSeconds);
 }
+
 void SGSingMixerInit(SGSingMixer *m, double rate, float level) {
     *m = (SGSingMixer){.gain = gain(level), .targetGain = gain(level), .instrumental = 1, .instrumentalTarget = 1,
                       .sampleRate = isfinite(rate) && rate >= 8000 && rate <= 192000 ? rate : 44100};
