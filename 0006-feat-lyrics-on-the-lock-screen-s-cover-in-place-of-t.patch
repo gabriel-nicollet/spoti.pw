@@ -1,0 +1,415 @@
+From 402170ea09fad226518e158195b95a6c9c9fcbef Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 12:54:14 +0200
+Subject: [PATCH 6/7] feat: lyrics on the lock screen's cover, in place of the
+ animated artwork
+
+A switch under Mod Settings > Lyrics and the Lock screen widget page makes the lock screen's artwork a card of the
+line being sung with the one before and after, over the blurred cover, drawn again on each line. The animated artwork
+is not sent while it is on.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018kDT8vFyubSsgomCWtALih
+---
+ docs/tweaks.md                                |  8 +-
+ tweak/Sources/App/Pages.m                     |  4 +-
+ .../LockScreenArtwork/LockScreenArtwork.x     |  6 +-
+ .../LockScreenArtworkSettings.m               |  6 +-
+ .../LockScreenLyrics/LockScreenLyrics.h       | 16 +++-
+ .../LockScreenLyrics/LockScreenLyrics.x       | 55 +++++++++---
+ .../LockScreenLyrics/LockScreenLyricsCover.m  | 86 +++++++++++++++++++
+ tweak/Sources/Shared/Lyrics/KaraokeSource.x   |  2 +-
+ tweak/Sources/Shared/Lyrics/Lyrics.h          |  2 +
+ tweak/Sources/Shared/Lyrics/LyricsSettings.m  |  8 ++
+ 10 files changed, 175 insertions(+), 18 deletions(-)
+ create mode 100644 tweak/Sources/Shared/LockScreenLyrics/LockScreenLyricsCover.m
+
+diff --git a/docs/tweaks.md b/docs/tweaks.md
+index 21206e0..0d23128 100644
+--- a/docs/tweaks.md
++++ b/docs/tweaks.md
+@@ -99,7 +99,9 @@ Shared:
+                   source is on. None of it runs while EeveeSpotify is injected with its own lyrics on (SGLyricsActive()):
+                   its hook on the same delegate calls blocks on a lyrics fetch, and LyricsHook calls it from the main
+                   queue. The Lyrics page says so
+-    LockScreenLyrics/ the line being sung in the system's now playing
++    LockScreenLyrics/ the line being sung in the system's now playing, and as a switch of its own the lyrics on the cover: the
++                  artwork is a card of the line, the one before and the one after over the blurred cover
++                  (LockScreenLyricsCover.m), a still per line; while it is on the animated artwork is not sent
+     LockScreenArtwork/ the track's Canvas or its album's Apple Music cover as the lock screen's animated
+                   artwork, from iOS 26 (Apple takes an MPMediaItemAnimatedArtwork under one of
+                   MPNowPlayingInfoCenter's animated artwork keys, and the mod puts one there through a second
+@@ -131,7 +133,9 @@ Shared:
+                   the render thread never waits for them. Unsupported formats retain Spotify's connection. The PCM
+                   packet queue is bounded and generation-stamped. Sing's source read-ahead reads guarded queue metadata
+                   for the verified Spotify binary; PCM still comes through its AudioUnit. Boundary tests are in harness/audio/ and harness/sing/
+-    Sing/         the local Core ML separator, source-domain audio adapter, worker and player lifecycle, from iOS 27. Core ML
++    Sing/         (SGSingSpatial.m: the spatial voice, plain C tested by harness/sing/spatial_test.c: the voice placed by a small
++                  head model, held in place by the yaw HeadGestures.x publishes (SGHeadYawLatest), the instrumental widened;
++                  Mod Settings > Karaoke > Spatial voice) the local Core ML separator, source-domain audio adapter, worker and player lifecycle, from iOS 27. Core ML
+                   uses the GPU in the foreground and its warm CPU model in the background. The audible
+                   clock follows emitted source samples while delayed audio drains. Model loading overlaps source capture;
+                   verified continuous next-track PCM keeps its worker and reserve across a natural transition.
+diff --git a/tweak/Sources/App/Pages.m b/tweak/Sources/App/Pages.m
+index c786dbf..7076f51 100644
+--- a/tweak/Sources/App/Pages.m
++++ b/tweak/Sources/App/Pages.m
+@@ -63,11 +63,11 @@ UIViewController *SGNavbarPage(void) {
+ // Pronunciation, translation, word sweeping and line meanings exist only in the redesign's lyrics.
+ UIViewController *SGLyricsSettingsPage(void) {
+     BOOL redesigned = SGRedesignedUIStored();
+-    NSMutableArray<SGModRow *> *more = [NSMutableArray arrayWithObject:SGLockScreenLyricsRow()];
++    NSMutableArray<SGModRow *> *more = [NSMutableArray arrayWithObjects:SGLockScreenLyricsRow(), SGLockScreenLyricsCoverRow(), nil];
+     if (!redesigned) [more insertObject:SGGlassLyricsRow() atIndex:0];
+     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObject:SGLyricsSourcesSection(redesigned)];
+     if (redesigned) {
+-        [sections addObject:SGSection(@"Display", @[SGLyricsWordTimingRow(), SGRLyricsTextSizesRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
++        [sections addObject:SGSection(@"Display", @[SGLyricsWordTimingRow(), SGRLyricsTextSizesRow(), SGRLyricsLandscapeRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
+     }
+     [sections addObject:SGSection(nil, more)];
+     return [[SGModPage alloc] initWithTitle:@"Lyrics" intro:SGRestartNote sections:sections footer:nil];
+diff --git a/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtwork.x b/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtwork.x
+index 3cbb293..bf787e4 100644
+--- a/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtwork.x
++++ b/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtwork.x
+@@ -8,6 +8,7 @@
+ #import "SGCanvas.h"
+ #import "Headers/SPTPlayer.h"
+ #import "Shared/Lyrics/Lyrics.h"
++#import "Shared/LockScreenLyrics/LockScreenLyrics.h"
+ #import "Shared/Player/PlayerState.h"
+ 
+ static NSString *const kCanvazAddress = @"https://spclient.wg.spotify.com/canvaz-cache/v0/canvases";
+@@ -246,12 +247,15 @@ static SGArtworkWatcher *sg_watcher;
+     id artwork;
+     NSString *key;
+     @synchronized (sg_lock) {
+-        if (info[MPMediaItemPropertyArtwork]) sg_cover = info[MPMediaItemPropertyArtwork];
++        // Never the lyrics card as the cover to fall back on: that is Spotify's.
++        if (info[MPMediaItemPropertyArtwork] && ![info[MPMediaItemPropertyArtwork] isKindOfClass:SGLyricsCoverArtwork.class]) sg_cover = info[MPMediaItemPropertyArtwork];
+         sg_info = info;
+         sg_infoAt = CFAbsoluteTimeGetCurrent();
+         artwork = sg_artwork;
+         key = sg_key;
+     }
++    // Lyrics on the cover take the artwork's place: no clip goes out under them.
++    if (SGFlag(SGKeyLockScreenLyricsCover, NO)) { artwork = nil; key = nil; }
+     %orig(SGArtworkInInfo(info, artwork, key));
+ }
+ %end
+diff --git a/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtworkSettings.m b/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtworkSettings.m
+index 016bad3..4825a33 100644
+--- a/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtworkSettings.m
++++ b/tweak/Sources/Shared/LockScreenArtwork/LockScreenArtworkSettings.m
+@@ -5,6 +5,7 @@
+ #import "Settings/SGOrderPage.h"
+ #import "Settings/SGPageStyle.h"
+ #import "LockScreenArtwork.h"
++#import "Shared/Lyrics/Lyrics.h"
+ 
+ static void sayWhatIsMissing(void) {
+     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Animated lock screen"
+@@ -39,12 +40,15 @@ SGModRow *SGArtworkSourcesRow(NSString *key, NSString *note) {
+ }
+ 
+ NSArray<SGModRow *> *SGAnimatedArtworkRows(void) {
++    // Lyrics on the cover come first: while on, they are the artwork and the clip stays away.
++    SGModRow *lyrics = SGLockScreenLyricsCoverRow();
+     if (!SGAnimatedArtworkAvailable())
+-        return @[SGStatActionRow(@"Animated lock screen", nil, ^NSString *{ return @"Needs iOS 26"; }, ^{ sayWhatIsMissing(); })];
++        return @[lyrics, SGStatActionRow(@"Animated lock screen", nil, ^NSString *{ return @"Needs iOS 26"; }, ^{ sayWhatIsMissing(); })];
+     SGModRow *order = SGArtworkSourcesRow(SGKeyLockScreenArtworkSources,
+         @"Asked top to bottom until one has a clip. Apple Music gets only the artist and album name.");
+     order.visible = ^BOOL { return SGFlag(SGKeyLockScreenArtwork, YES); };
+     return @[
++        lyrics,
+         SGSwitchRow(@"Animated lock screen", @"A moving cover behind the lock screen's controls", SGKeyLockScreenArtwork),
+         order,
+     ];
+diff --git a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.h b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.h
+index 4e92f63..fa85348 100644
+--- a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.h
++++ b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.h
+@@ -1,6 +1,20 @@
+ // The line being sung in place of the artist in the system's now playing: lock screen, Dynamic Island,
+ // Control Center, CarPlay. There is a Live Activity for it too (Shared/LiveActivity). The
+ // lines and the clock come from Karaoke.
+-#import <Foundation/Foundation.h>
++//
++// And, as a switch of its own, the lyrics on the cover: the artwork the lock screen shows is a card of the line being
++// sung with the one before and the one after, over the album's cover blurred and dimmed, drawn again on each line
++// (LockScreenLyricsCover.m). It is the artwork the system is handed, so animated artwork steps aside while it is on.
++#import <MediaPlayer/MediaPlayer.h>
++#import <UIKit/UIKit.h>
+ 
+ #define SGKeyLockScreenLyrics @"spotifyglass.lockScreenLyrics"
++#define SGKeyLockScreenLyricsCover @"spotifyglass.lockScreenLyrics.cover"   // off until switched on
++
++// The artwork of the lyrics card, a class of its own so a hook that remembers Spotify's cover can tell it is not it.
++@interface SGLyricsCoverArtwork : MPMediaItemArtwork
++@end
++
++// The card for `current` between `previous` and `next` (either may be nil), over `cover` (nil: black), `size` points square
++// at scale 1. Safe on any thread.
++UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *current, NSString *next, CGSize size);
+diff --git a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
+index f635942..fd9f92a 100644
+--- a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
++++ b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
+@@ -24,6 +24,8 @@ static NSDictionary *sg_spotifyInfo;
+ static CFAbsoluteTime sg_spotifyInfoAt;
+ static NSString *sg_shownLine;
+ static BOOL sg_resending;
++// What the cover was last drawn for: the track and the line's index, or nil with no line.
++static NSString *sg_shownCover;
+ static NSTimer *sg_timer;
+ 
+ static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
+@@ -65,8 +67,11 @@ static double elapsedAt(NSDictionary *info, CFAbsoluteTime reportedAt, CFAbsolut
+     return [info[MPNowPlayingInfoPropertyElapsedPlaybackTime] doubleValue] + rate * (now - reportedAt);
+ }
+ 
++// The lines around the one being sung, for the lyrics card, whole and not cut to the artist row.
++static NSString *textOfLine(SGKaraokeLine *line) { return line ? SGKaraokeLineText(line) : nil; }
++
+ // nil between lines and for a track without synced lyrics, plain text included.
+-static NSString *lineFor(NSDictionary *info, double elapsed) {
++static NSString *lineFor(NSDictionary *info, double elapsed, NSArray<NSString *> **around, NSString **coverKey) {
+     SPTPlayerState *state = [(id<SPTPlayer>)SGKaraokePlayer() state];
+     // The player's track can lag behind the now playing info; its lyrics would then be another song's.
+     if (![state.track.trackTitle isEqualToString:info[MPMediaItemPropertyTitle]]) return nil;
+@@ -83,6 +88,9 @@ static NSString *lineFor(NSDictionary *info, double elapsed) {
+     if (index < 0) return nil;
+     BOOL nextFarOff = index + 1 == (NSInteger)lines.count || lines[index + 1].start - position > kBreakMs;
+     if (position > lines[index].end + kBreakMs && nextFarOff) return nil;
++    if (around) *around = @[textOfLine(index > 0 ? lines[index - 1] : nil) ?: @"", textOfLine(lines[index]) ?: @"",
++                            textOfLine(index + 1 < (NSInteger)lines.count ? lines[index + 1] : nil) ?: @""];
++    if (coverKey) *coverKey = [NSString stringWithFormat:@"%@|%ld", trackID, (long)index];
+     NSString *shown = nil;
+     for (NSArray<SGKaraokeWord *> *piece in piecesOf(lines[index])) {
+         if (!shown || piece.firstObject.start <= position) shown = textOf(piece);
+@@ -90,9 +98,26 @@ static NSString *lineFor(NSDictionary *info, double elapsed) {
+     return shown;
+ }
+ 
+-static NSDictionary *withLine(NSDictionary *info, NSString *line, double elapsed) {
++// The card for a line as the artwork the lock screen is handed, over Spotify's cover. It keeps `base` (Spotify's own
++// MPMediaItemArtwork) and asks it for its image whenever the system asks for a size.
++static MPMediaItemArtwork *coverFor(MPMediaItemArtwork *base, NSArray<NSString *> *around) {
++    NSString *previous = around[0].length ? around[0] : nil, *current = around[1], *next = around[2].length ? around[2] : nil;
++    CGSize bounds = base ? base.bounds.size : CGSizeMake(600, 600);
++    if (bounds.width < 1 || bounds.height < 1) bounds = CGSizeMake(600, 600);
++    return [[SGLyricsCoverArtwork alloc] initWithBoundsSize:bounds requestHandler:^UIImage *(CGSize size) {
++        UIImage *cover = [base imageWithSize:size] ?: [base imageWithSize:base.bounds.size];
++        return SGLyricsCoverImage(cover, previous, current, next, size);
++    }];
++}
++
++static NSDictionary *withLine(NSDictionary *info, NSString *line, NSArray<NSString *> *around, double elapsed) {
+     NSMutableDictionary *shown = [info mutableCopy];
+-    if (line) shown[MPMediaItemPropertyArtist] = line;
++    if (line && SGFlag(SGKeyLockScreenLyrics, NO)) shown[MPMediaItemPropertyArtist] = line;
++    // Spotify's own cover, once per track: our card is never the base of the next one.
++    MPMediaItemArtwork *base = info[MPMediaItemPropertyArtwork];
++    if (around && SGFlag(SGKeyLockScreenLyricsCover, NO) && ![base isKindOfClass:SGLyricsCoverArtwork.class]) {
++        shown[MPMediaItemPropertyArtwork] = coverFor(base, around);
++    }
+     // iOS reads a resent elapsed time as the position now, so Spotify's older one would jump the bar back.
+     shown[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(elapsed);
+     return shown;
+@@ -108,11 +133,17 @@ static void tick(void) {
+     if (!info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) return;
+     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+     double elapsed = elapsedAt(info, reportedAt, now);
+-    NSString *line = lineFor(info, elapsed);
+-    if (line == sg_shownLine || [line isEqualToString:sg_shownLine]) return;
++    NSArray<NSString *> *around = nil;
++    NSString *coverKey = nil;
++    NSString *line = lineFor(info, elapsed, &around, &coverKey);
++    BOOL cover = SGFlag(SGKeyLockScreenLyricsCover, NO);
++    BOOL sameLine = line == sg_shownLine || [line isEqualToString:sg_shownLine];
++    BOOL sameCover = !cover || coverKey == sg_shownCover || [coverKey isEqualToString:sg_shownCover];
++    if (sameLine && sameCover) return;
+     sg_shownLine = line;
++    sg_shownCover = coverKey;
+     sg_resending = YES;
+-    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = withLine(info, line, elapsed);
++    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = withLine(info, line, around, elapsed);
+     sg_resending = NO;
+ }
+ 
+@@ -151,6 +182,7 @@ static BOOL playingBy(NSDictionary *info) {
+     if (!NSThread.isMainThread || !info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) {
+         dispatch_async(dispatch_get_main_queue(), ^{
+             sg_shownLine = nil;
++            sg_shownCover = nil;
+             setTicking(playing);
+         });
+         %orig;
+@@ -158,9 +190,12 @@ static BOOL playingBy(NSDictionary *info) {
+     }
+     setTicking(playing);
+     double elapsed = elapsedAt(info, now, now);
+-    NSString *line = lineFor(info, elapsed);
++    NSArray<NSString *> *around = nil;
++    NSString *coverKey = nil;
++    NSString *line = lineFor(info, elapsed, &around, &coverKey);
+     sg_shownLine = line;
+-    %orig(withLine(info, line, elapsed));
++    sg_shownCover = coverKey;
++    %orig(withLine(info, line, around, elapsed));
+ }
+ 
+ - (NSDictionary *)nowPlayingInfo {
+@@ -173,9 +208,9 @@ static BOOL playingBy(NSDictionary *info) {
+ %end
+ 
+ %ctor {
+-    if (!SGFlag(SGKeyLockScreenLyrics, NO)) return;
++    if (!SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO)) return;
+     sg_lock = [NSObject new];
+     %init;
+     // The timer waits for Spotify to report a playing track; nothing before that has a line to show.
+-    SGLog(@"lock screen lyrics: on");
++    SGLog(@"lock screen lyrics: on, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
+ }
+diff --git a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyricsCover.m b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyricsCover.m
+new file mode 100644
+index 0000000..b6e876c
+--- /dev/null
++++ b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyricsCover.m
+@@ -0,0 +1,86 @@
++// The card behind the lock screen's controls when "Lyrics on the cover" is on: the album's cover blurred and dimmed, the line
++// being sung large and white at the middle, the line before it and the line after it smaller and dim. It is a still per line,
++// drawn when the line changes (a few times a minute), not an animation: iOS gives a now playing artwork no per-word clock.
++#import <CoreImage/CoreImage.h>
++#import "LockScreenLyrics.h"
++
++@implementation SGLyricsCoverArtwork
++@end
++
++static UIImage *blurred(UIImage *cover, CGSize size) {
++    CIImage *input = cover.CIImage ?: (cover.CGImage ? [CIImage imageWithCGImage:cover.CGImage] : nil);
++    if (!input) return nil;
++    CGRect extent = input.extent;
++    if (CGRectIsInfinite(extent) || extent.size.width < 1 || extent.size.height < 1) return nil;
++    CIFilter *blur = [CIFilter filterWithName:@"CIGaussianBlur"];
++    [blur setValue:[input imageByClampingToExtent] forKey:kCIInputImageKey];
++    [blur setValue:@(MAX(extent.size.width, extent.size.height) / 14) forKey:kCIInputRadiusKey];
++    CIImage *output = [blur.outputImage imageByCroppingToRect:extent];
++    static CIContext *context;
++    static dispatch_once_t once;
++    dispatch_once(&once, ^{ context = [CIContext contextWithOptions:nil]; });
++    CGImageRef image = [context createCGImage:output fromRect:extent];
++    if (!image) return nil;
++    UIImage *result = [UIImage imageWithCGImage:image];
++    CGImageRelease(image);
++    return result;
++}
++
++// The largest size, from `start` down, at which `text` fits `width` in at most `lines` lines.
++static UIFont *fitted(NSString *text, CGFloat start, CGFloat width, NSUInteger lines, UIFontWeight weight) {
++    for (CGFloat size = start; size > 10; size -= 2) {
++        UIFont *font = [UIFont systemFontOfSize:size weight:weight];
++        CGRect box = [text boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
++                                     attributes:@{NSFontAttributeName: font} context:nil];
++        if (ceil(box.size.height) <= ceil(font.lineHeight) * lines + 1) return font;
++    }
++    return [UIFont systemFontOfSize:10 weight:weight];
++}
++
++UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *current, NSString *next, CGSize size) {
++    if (size.width < 8 || size.height < 8 || size.width > 4096 || size.height > 4096) size = CGSizeMake(600, 600);
++    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
++    format.scale = 1;
++    format.opaque = YES;
++    UIImage *back = cover ? blurred(cover, size) : nil;
++    return [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
++        CGRect all = CGRectMake(0, 0, size.width, size.height);
++        [UIColor.blackColor setFill];
++        UIRectFill(all);
++        UIImage *picture = back ?: cover;
++        if (picture && picture.size.width > 0 && picture.size.height > 0) {
++            CGFloat scale = MAX(size.width / picture.size.width, size.height / picture.size.height) * (back ? 1.15 : 1);
++            CGSize drawn = CGSizeMake(picture.size.width * scale, picture.size.height * scale);
++            [picture drawInRect:CGRectMake((size.width - drawn.width) / 2, (size.height - drawn.height) / 2, drawn.width, drawn.height)];
++        }
++        [[UIColor colorWithWhite:0 alpha:back ? 0.5 : 0.35] setFill];
++        UIRectFill(all);
++
++        CGFloat margin = size.width * 0.09, width = size.width - margin * 2, gap = size.height * 0.035;
++        NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
++        style.alignment = NSTextAlignmentCenter;
++        NSShadow *shadow = [NSShadow new];
++        shadow.shadowColor = [UIColor colorWithWhite:0 alpha:0.5];
++        shadow.shadowBlurRadius = size.width * 0.02;
++        UIFont *main = fitted(current ?: @"", size.width * 0.115, width, 5, UIFontWeightHeavy);
++        UIFont *small = [UIFont systemFontOfSize:MAX(10, main.pointSize * 0.55) weight:UIFontWeightSemibold];
++        // Heights first, so the line being sung sits at the middle however long the others are.
++        CGSize (^measure)(NSString *, UIFont *) = ^CGSize(NSString *text, UIFont *font) {
++            if (!text.length) return CGSizeZero;
++            CGRect box = [text boundingRectWithSize:CGSizeMake(width, size.height * 0.28) options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
++                                         attributes:@{NSFontAttributeName: font, NSParagraphStyleAttributeName: style} context:nil];
++            return CGSizeMake(width, ceil(box.size.height));
++        };
++        CGSize mainSize = measure(current, main), previousSize = measure(previous, small), nextSize = measure(next, small);
++        CGFloat middle = size.height / 2;
++        void (^draw)(NSString *, UIFont *, CGFloat, CGRect, CGFloat) = ^(NSString *text, UIFont *font, CGFloat alpha, CGRect box, CGFloat unused) {
++            if (!text.length) return;
++            [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine attributes:@{
++                NSFontAttributeName: font, NSParagraphStyleAttributeName: style, NSShadowAttributeName: shadow,
++                NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:alpha]} context:nil];
++        };
++        draw(current, main, 1, CGRectMake(margin, middle - mainSize.height / 2, width, mainSize.height), 0);
++        draw(previous, small, 0.45, CGRectMake(margin, middle - mainSize.height / 2 - gap - previousSize.height, width, previousSize.height), 0);
++        draw(next, small, 0.45, CGRectMake(margin, middle + mainSize.height / 2 + gap, width, nextSize.height), 0);
++    }];
++}
+diff --git a/tweak/Sources/Shared/Lyrics/KaraokeSource.x b/tweak/Sources/Shared/Lyrics/KaraokeSource.x
+index eb851a0..3152d06 100644
+--- a/tweak/Sources/Shared/Lyrics/KaraokeSource.x
++++ b/tweak/Sources/Shared/Lyrics/KaraokeSource.x
+@@ -341,7 +341,7 @@ static SGKaraokeTrackWatcher *sg_trackWatcher;
+ %ctor {
+     // The sources that search by name learn the name from the player, so the player is caught
+     // whenever one is on, not only for the redesign's lyrics and the lock screen.
+-    if (!SGRedesignedUI() && !SGFlag(SGKeyLockScreenLyrics, NO) && !SGLyricsActive()) return;
++    if (!SGRedesignedUI() && !SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO) && !SGLyricsActive()) return;
+     sg_seenTracks = [NSMutableDictionary dictionary];
+     sg_lyrics = [NSMutableDictionary dictionary];
+     sg_requested = [NSMutableSet set];
+diff --git a/tweak/Sources/Shared/Lyrics/Lyrics.h b/tweak/Sources/Shared/Lyrics/Lyrics.h
+index c7df80a..1d7114a 100644
+--- a/tweak/Sources/Shared/Lyrics/Lyrics.h
++++ b/tweak/Sources/Shared/Lyrics/Lyrics.h
+@@ -14,6 +14,8 @@
+ // being where translations show), and whether lines timed only by the line are swept word by word.
+ SGModSection *SGLyricsSourcesSection(BOOL namingSource);
+ SGModRow *SGLockScreenLyricsRow(void);
++// The lyrics on the cover: the lock screen's artwork is a card of the line being sung, instead of the cover or its clip.
++SGModRow *SGLockScreenLyricsCoverRow(void);
+ SGModRow *SGLyricsTranslationLanguageRow(void);
+ SGModRow *SGLyricsWordTimingRow(void);
+ 
+diff --git a/tweak/Sources/Shared/Lyrics/LyricsSettings.m b/tweak/Sources/Shared/Lyrics/LyricsSettings.m
+index 44f73e7..439075b 100644
+--- a/tweak/Sources/Shared/Lyrics/LyricsSettings.m
++++ b/tweak/Sources/Shared/Lyrics/LyricsSettings.m
+@@ -24,6 +24,14 @@ SGModRow *SGLockScreenLyricsRow(void) {
+     return SGOptionRow(@"Lock screen lyrics", @"Current line in place of the artist", SGKeyLockScreenLyrics);
+ }
+ 
++SGModRow *SGLockScreenLyricsCoverRow(void) {
++    SGModRow *row = SGOptionRow(@"Lyrics on the cover", @"The lock screen's artwork is the lyrics", SGKeyLockScreenLyricsCover);
++    row.info = @"The line being sung, with the one before and the one after, over the album's cover blurred, as the lock screen's "
++               "artwork, drawn again on each line. It replaces the animated cover while it is on. Needs a song with synced lyrics; "
++               "without them the cover stays as it is.";
++    return row;
++}
++
+ SGModRow *SGLyricsTranslationLanguageRow(void) {
+     SGModRow *row = SGChoiceRow(@"Translation language", nil, SGKeyLyricsTranslationLanguage, SGLyricsTranslationLanguageNames(), 0);
+     row.choiceFooter = @"Used when the lyrics come with translations. Any shows the first.";
+-- 
+2.43.0
+
