@@ -1,27 +1,49 @@
-// The control's full travel represents 0–110% vocals.
-// 100% is the original mix, and 110% is vocals only.
-// Shared by UI, controller and mixer so touch, accessibility and
-// programmatic changes all use the same range.
+// Sing level:
+// 0%   = instrumental only
+// 100% = original mix
+// 110% = vocals only
+//
+// The UI maps these values onto two equal physical sections:
+// 0–100% below the midpoint, 100–110% above it.
 
 #pragma once
 #include <math.h>
 
 #define SGSingMinimumVocalLevel 0.0f
 #define SGSingMaximumVocalLevel 1.1f
+#define SGSingOriginalMixLevel 1.0f
 
 static inline float SGSingClampLevel(float value) {
     return isfinite(value)
-        ? fmaxf(SGSingMinimumVocalLevel, fminf(SGSingMaximumVocalLevel, value))
-        : 1.0f;
+        ? fmaxf(SGSingMinimumVocalLevel,
+                fminf(SGSingMaximumVocalLevel, value))
+        : SGSingOriginalMixLevel;
 }
 
+// Physical slider position:
+// 0.0 = instrumental only
+// 0.5 = original mix
+// 1.0 = vocals only
 static inline float SGSingLevelFromPosition(float position) {
-    return SGSingMinimumVocalLevel
-        + (SGSingMaximumVocalLevel - SGSingMinimumVocalLevel)
-        * fmaxf(0.0f, fminf(1.0f, position));
+    position = fmaxf(0.0f, fminf(1.0f, position));
+
+    if (position <= 0.5f) {
+        // 0 → 100%
+        return position * 2.0f;
+    }
+
+    // 100 → 110%
+    return SGSingOriginalMixLevel + (position - 0.5f) * 0.2f;
 }
 
 static inline float SGSingPositionFromLevel(float level) {
-    return (SGSingClampLevel(level) - SGSingMinimumVocalLevel)
-        / (SGSingMaximumVocalLevel - SGSingMinimumVocalLevel);
+    level = SGSingClampLevel(level);
+
+    if (level <= SGSingOriginalMixLevel) {
+        // 0 → 100% occupies the bottom half.
+        return level * 0.5f;
+    }
+
+    // 100 → 110% occupies the top half.
+    return 0.5f + (level - SGSingOriginalMixLevel) * 5.0f;
 }
