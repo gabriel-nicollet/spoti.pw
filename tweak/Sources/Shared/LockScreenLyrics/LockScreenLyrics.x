@@ -24,6 +24,8 @@ static NSDictionary *sg_spotifyInfo;
 static CFAbsoluteTime sg_spotifyInfoAt;
 static NSString *sg_shownLine;
 static BOOL sg_resending;
+// What the cover was last drawn for: the track and the line's index, or nil with no line.
+static NSString *sg_shownCover;
 static NSTimer *sg_timer;
 
 static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
@@ -65,8 +67,11 @@ static double elapsedAt(NSDictionary *info, CFAbsoluteTime reportedAt, CFAbsolut
     return [info[MPNowPlayingInfoPropertyElapsedPlaybackTime] doubleValue] + rate * (now - reportedAt);
 }
 
+// The lines around the one being sung, for the lyrics card, whole and not cut to the artist row.
+static NSString *textOfLine(SGKaraokeLine *line) { return line ? SGKaraokeLineText(line) : nil; }
+
 // nil between lines and for a track without synced lyrics, plain text included.
-static NSString *lineFor(NSDictionary *info, double elapsed) {
+static NSString *lineFor(NSDictionary *info, double elapsed, NSArray<NSString *> **around, NSString **coverKey) {
     SPTPlayerState *state = [(id<SPTPlayer>)SGKaraokePlayer() state];
     // The player's track can lag behind the now playing info; its lyrics would then be another song's.
     if (![state.track.trackTitle isEqualToString:info[MPMediaItemPropertyTitle]]) return nil;
@@ -83,6 +88,9 @@ static NSString *lineFor(NSDictionary *info, double elapsed) {
     if (index < 0) return nil;
     BOOL nextFarOff = index + 1 == (NSInteger)lines.count || lines[index + 1].start - position > kBreakMs;
     if (position > lines[index].end + kBreakMs && nextFarOff) return nil;
+    if (around) *around = @[textOfLine(index > 0 ? lines[index - 1] : nil) ?: @"", textOfLine(lines[index]) ?: @"",
+                            textOfLine(index + 1 < (NSInteger)lines.count ? lines[index + 1] : nil) ?: @""];
+    if (coverKey) *coverKey = [NSString stringWithFormat:@"%@|%ld", trackID, (long)index];
     NSString *shown = nil;
     for (NSArray<SGKaraokeWord *> *piece in piecesOf(lines[index])) {
         if (!shown || piece.firstObject.start <= position) shown = textOf(piece);
@@ -90,9 +98,26 @@ static NSString *lineFor(NSDictionary *info, double elapsed) {
     return shown;
 }
 
-static NSDictionary *withLine(NSDictionary *info, NSString *line, double elapsed) {
+// The card for a line as the artwork the lock screen is handed, over Spotify's cover. It keeps `base` (Spotify's own
+// MPMediaItemArtwork) and asks it for its image whenever the system asks for a size.
+static MPMediaItemArtwork *coverFor(MPMediaItemArtwork *base, NSArray<NSString *> *around) {
+    NSString *previous = around[0].length ? around[0] : nil, *current = around[1], *next = around[2].length ? around[2] : nil;
+    CGSize bounds = base ? base.bounds.size : CGSizeMake(600, 600);
+    if (bounds.width < 1 || bounds.height < 1) bounds = CGSizeMake(600, 600);
+    return [[SGLyricsCoverArtwork alloc] initWithBoundsSize:bounds requestHandler:^UIImage *(CGSize size) {
+        UIImage *cover = [base imageWithSize:size] ?: [base imageWithSize:base.bounds.size];
+        return SGLyricsCoverImage(cover, previous, current, next, size);
+    }];
+}
+
+static NSDictionary *withLine(NSDictionary *info, NSString *line, NSArray<NSString *> *around, double elapsed) {
     NSMutableDictionary *shown = [info mutableCopy];
-    if (line) shown[MPMediaItemPropertyArtist] = line;
+    if (line && SGFlag(SGKeyLockScreenLyrics, NO)) shown[MPMediaItemPropertyArtist] = line;
+    // Spotify's own cover, once per track: our card is never the base of the next one.
+    MPMediaItemArtwork *base = info[MPMediaItemPropertyArtwork];
+    if (around && SGFlag(SGKeyLockScreenLyricsCover, NO) && ![base isKindOfClass:SGLyricsCoverArtwork.class]) {
+        shown[MPMediaItemPropertyArtwork] = coverFor(base, around);
+    }
     // iOS reads a resent elapsed time as the position now, so Spotify's older one would jump the bar back.
     shown[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(elapsed);
     return shown;
@@ -108,11 +133,17 @@ static void tick(void) {
     if (!info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) return;
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
     double elapsed = elapsedAt(info, reportedAt, now);
-    NSString *line = lineFor(info, elapsed);
-    if (line == sg_shownLine || [line isEqualToString:sg_shownLine]) return;
+    NSArray<NSString *> *around = nil;
+    NSString *coverKey = nil;
+    NSString *line = lineFor(info, elapsed, &around, &coverKey);
+    BOOL cover = SGFlag(SGKeyLockScreenLyricsCover, NO);
+    BOOL sameLine = line == sg_shownLine || [line isEqualToString:sg_shownLine];
+    BOOL sameCover = !cover || coverKey == sg_shownCover || [coverKey isEqualToString:sg_shownCover];
+    if (sameLine && sameCover) return;
     sg_shownLine = line;
+    sg_shownCover = coverKey;
     sg_resending = YES;
-    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = withLine(info, line, elapsed);
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = withLine(info, line, around, elapsed);
     sg_resending = NO;
 }
 
@@ -151,6 +182,7 @@ static BOOL playingBy(NSDictionary *info) {
     if (!NSThread.isMainThread || !info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) {
         dispatch_async(dispatch_get_main_queue(), ^{
             sg_shownLine = nil;
+            sg_shownCover = nil;
             setTicking(playing);
         });
         %orig;
@@ -158,9 +190,12 @@ static BOOL playingBy(NSDictionary *info) {
     }
     setTicking(playing);
     double elapsed = elapsedAt(info, now, now);
-    NSString *line = lineFor(info, elapsed);
+    NSArray<NSString *> *around = nil;
+    NSString *coverKey = nil;
+    NSString *line = lineFor(info, elapsed, &around, &coverKey);
     sg_shownLine = line;
-    %orig(withLine(info, line, elapsed));
+    sg_shownCover = coverKey;
+    %orig(withLine(info, line, around, elapsed));
 }
 
 - (NSDictionary *)nowPlayingInfo {
@@ -173,9 +208,9 @@ static BOOL playingBy(NSDictionary *info) {
 %end
 
 %ctor {
-    if (!SGFlag(SGKeyLockScreenLyrics, NO)) return;
+    if (!SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO)) return;
     sg_lock = [NSObject new];
     %init;
     // The timer waits for Spotify to report a playing track; nothing before that has a line to show.
-    SGLog(@"lock screen lyrics: on");
+    SGLog(@"lock screen lyrics: on, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
 }

@@ -5,6 +5,7 @@
 #import "Settings/SGOrderPage.h"
 #import "Settings/SGPageStyle.h"
 #import "LockScreenArtwork.h"
+#import "Shared/Lyrics/Lyrics.h"
 
 static void sayWhatIsMissing(void) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Animated lock screen"
@@ -39,12 +40,15 @@ SGModRow *SGArtworkSourcesRow(NSString *key, NSString *note) {
 }
 
 NSArray<SGModRow *> *SGAnimatedArtworkRows(void) {
+    // Lyrics on the cover come first: while on, they are the artwork and the clip stays away.
+    SGModRow *lyrics = SGLockScreenLyricsCoverRow();
     if (!SGAnimatedArtworkAvailable())
-        return @[SGStatActionRow(@"Animated lock screen", nil, ^NSString *{ return @"Needs iOS 26"; }, ^{ sayWhatIsMissing(); })];
+        return @[lyrics, SGStatActionRow(@"Animated lock screen", nil, ^NSString *{ return @"Needs iOS 26"; }, ^{ sayWhatIsMissing(); })];
     SGModRow *order = SGArtworkSourcesRow(SGKeyLockScreenArtworkSources,
         @"Asked top to bottom until one has a clip. Apple Music gets only the artist and album name.");
     order.visible = ^BOOL { return SGFlag(SGKeyLockScreenArtwork, YES); };
     return @[
+        lyrics,
         SGSwitchRow(@"Animated lock screen", @"A moving cover behind the lock screen's controls", SGKeyLockScreenArtwork),
         order,
     ];

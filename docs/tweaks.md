@@ -99,7 +99,9 @@ Shared:
                   source is on. None of it runs while EeveeSpotify is injected with its own lyrics on (SGLyricsActive()):
                   its hook on the same delegate calls blocks on a lyrics fetch, and LyricsHook calls it from the main
                   queue. The Lyrics page says so
-    LockScreenLyrics/ the line being sung in the system's now playing
+    LockScreenLyrics/ the line being sung in the system's now playing, and as a switch of its own the lyrics on the cover: the
+                  artwork is a card of the line, the one before and the one after over the blurred cover
+                  (LockScreenLyricsCover.m), a still per line; while it is on the animated artwork is not sent
     LockScreenArtwork/ the track's Canvas or its album's Apple Music cover as the lock screen's animated
                   artwork, from iOS 26 (Apple takes an MPMediaItemAnimatedArtwork under one of
                   MPNowPlayingInfoCenter's animated artwork keys, and the mod puts one there through a second
@@ -131,7 +133,9 @@ Shared:
                   the render thread never waits for them. Unsupported formats retain Spotify's connection. The PCM
                   packet queue is bounded and generation-stamped. Sing's source read-ahead reads guarded queue metadata
                   for the verified Spotify binary; PCM still comes through its AudioUnit. Boundary tests are in harness/audio/ and harness/sing/
-    Sing/         the local Core ML separator, source-domain audio adapter, worker and player lifecycle, from iOS 27. Core ML
+    Sing/         (SGSingSpatial.m: the spatial voice, plain C tested by harness/sing/spatial_test.c: the voice placed by a small
+                  head model, held in place by the yaw HeadGestures.x publishes (SGHeadYawLatest), the instrumental widened;
+                  Mod Settings > Karaoke > Spatial voice) the local Core ML separator, source-domain audio adapter, worker and player lifecycle, from iOS 27. Core ML
                   uses the GPU in the foreground and its warm CPU model in the background. The audible
                   clock follows emitted source samples while delayed audio drains. Model loading overlaps source capture;
                   verified continuous next-track PCM keeps its worker and reserve across a natural transition.

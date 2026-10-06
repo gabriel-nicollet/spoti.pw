@@ -24,6 +24,14 @@ SGModRow *SGLockScreenLyricsRow(void) {
     return SGOptionRow(@"Lock screen lyrics", @"Current line in place of the artist", SGKeyLockScreenLyrics);
 }
 
+SGModRow *SGLockScreenLyricsCoverRow(void) {
+    SGModRow *row = SGOptionRow(@"Lyrics on the cover", @"The lock screen's artwork is the lyrics", SGKeyLockScreenLyricsCover);
+    row.info = @"The line being sung, with the one before and the one after, over the album's cover blurred, as the lock screen's "
+               "artwork, drawn again on each line. It replaces the animated cover while it is on. Needs a song with synced lyrics; "
+               "without them the cover stays as it is.";
+    return row;
+}
+
 SGModRow *SGLyricsTranslationLanguageRow(void) {
     SGModRow *row = SGChoiceRow(@"Translation language", nil, SGKeyLyricsTranslationLanguage, SGLyricsTranslationLanguageNames(), 0);
     row.choiceFooter = @"Used when the lyrics come with translations. Any shows the first.";

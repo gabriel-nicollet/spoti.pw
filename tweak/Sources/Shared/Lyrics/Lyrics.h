@@ -14,6 +14,8 @@
 // being where translations show), and whether lines timed only by the line are swept word by word.
 SGModSection *SGLyricsSourcesSection(BOOL namingSource);
 SGModRow *SGLockScreenLyricsRow(void);
+// The lyrics on the cover: the lock screen's artwork is a card of the line being sung, instead of the cover or its clip.
+SGModRow *SGLockScreenLyricsCoverRow(void);
 SGModRow *SGLyricsTranslationLanguageRow(void);
 SGModRow *SGLyricsWordTimingRow(void);
 

@@ -8,6 +8,7 @@
 #import "SGCanvas.h"
 #import "Headers/SPTPlayer.h"
 #import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LockScreenLyrics/LockScreenLyrics.h"
 #import "Shared/Player/PlayerState.h"
 
 static NSString *const kCanvazAddress = @"https://spclient.wg.spotify.com/canvaz-cache/v0/canvases";
@@ -246,12 +247,15 @@ static SGArtworkWatcher *sg_watcher;
     id artwork;
     NSString *key;
     @synchronized (sg_lock) {
-        if (info[MPMediaItemPropertyArtwork]) sg_cover = info[MPMediaItemPropertyArtwork];
+        // Never the lyrics card as the cover to fall back on: that is Spotify's.
+        if (info[MPMediaItemPropertyArtwork] && ![info[MPMediaItemPropertyArtwork] isKindOfClass:SGLyricsCoverArtwork.class]) sg_cover = info[MPMediaItemPropertyArtwork];
         sg_info = info;
         sg_infoAt = CFAbsoluteTimeGetCurrent();
         artwork = sg_artwork;
         key = sg_key;
     }
+    // Lyrics on the cover take the artwork's place: no clip goes out under them.
+    if (SGFlag(SGKeyLockScreenLyricsCover, NO)) { artwork = nil; key = nil; }
     %orig(SGArtworkInInfo(info, artwork, key));
 }
 %end

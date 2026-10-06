@@ -3,6 +3,7 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "LyricsText.h"
+#import "LandscapeLyrics.h"
 
 @interface SGRLyricsTextPage : SGPage
 @end
@@ -90,4 +91,12 @@
 
 SGModRow *SGRLyricsTextSizesRow(void) {
     return SGPageRow(@"Text sizes", ^UIViewController *{ return [SGRLyricsTextPage new]; });
+}
+
+SGModRow *SGRLyricsLandscapeRow(void) {
+    SGModRow *row = SGOptionRow(@"Landscape lyrics", @"The lyrics page turns with the phone", SGRKeyLyricsLandscape);
+    row.info = @"While the full screen lyrics page is open, Spotify turns to landscape when the phone does, the lyrics reflowing "
+               "across the wider screen, and goes back upright when you close it. Nothing else in the app turns. "
+               "Rotation lock in Control Center still decides whether the phone turns at all.";
+    return row;
 }
