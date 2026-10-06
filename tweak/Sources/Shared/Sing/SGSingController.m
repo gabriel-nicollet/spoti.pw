@@ -461,7 +461,7 @@ float SGSingReducedLevel(void) { return sg_controller.reduced; }
 void SGSingSetVocalLevel(float level) {
     if (!sg_configured) return;
     sg_controller.level = SGSingClampLevel(level);
-    if (sg_controller.level < 1) sg_controller.reduced = sg_controller.level;
+    if (sg_controller.level > 0.05f && sg_controller.level < 1) sg_controller.reduced = sg_controller.level;
     if (sg_controller.session) SGSingStreamSetLevel(stream(sg_controller.session), sg_controller.level);
     [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
 }
