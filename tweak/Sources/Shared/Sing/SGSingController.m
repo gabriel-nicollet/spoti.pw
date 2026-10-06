@@ -112,7 +112,7 @@ static void workerStatus(void *context, int32_t status) {
 - (instancetype)init {
     if (!(self = [super init])) return nil;
     _retired = [NSMutableSet set];
-    _level = _reduced = SGSingMinimumVocalLevel;
+    _level = _reduced = 0.8f;
     // Without its voice model Sing is unavailable and shows nothing; Mod Settings > Karaoke says why and gets it.
     _model = SGSingModelPath();
     _state = _model ? SGSingIdle : SGSingUnavailable;
