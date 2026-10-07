@@ -689,7 +689,7 @@ static double wholeFrom(SGKaraokeLine *run, BOOL sweepsEstimates) {
         _translation.numberOfLines = 0;
         _translation.font = style.translation;
         _translation.textColor = UIColor.whiteColor;
-        _translation.alpha = kDimAlpha;
+        _translation.alpha = SGRLyricsStyleDim();
         _translation.textAlignment = _right ? NSTextAlignmentRight : NSTextAlignmentLeft;
         _translation.text = line.translation;
         [self addSubview:_translation];
@@ -738,9 +738,14 @@ static const NSUInteger kLinesPerFrame = 4;
     NSUInteger generation = ++_generation;
     if (_translation) {
         [UIView animateWithDuration:active ? 0.3 : 0.5 delay:0 options:UIViewAnimationOptionBeginFromCurrentState
-                         animations:^{ self->_translation.alpha = active ? kTranslationLit : kDimAlpha; } completion:nil];
+                         animations:^{ self->_translation.alpha = active ? kTranslationLit : SGRLyricsStyleDim(); } completion:nil];
     }
     if (active) {
+        CGFloat bloom = SGRLyricsStyleBloom() / 100.0;
+        self.layer.shadowColor = UIColor.whiteColor.CGColor;
+        self.layer.shadowOpacity = (float)MIN(0.8, bloom * 0.8);
+        self.layer.shadowRadius = 10.0 * bloom;
+        self.layer.shadowOffset = CGSizeZero;
         NSMutableArray<SGRKaraokeWordView *> *whole = [NSMutableArray array];
         for (SGRKaraokeWordView *word in _words) {
             [word.layer removeAllAnimations];
@@ -758,6 +763,7 @@ static const NSUInteger kLinesPerFrame = 4;
                          animations:^{ for (SGRKaraokeWordView *word in whole) word.lit.alpha = 1; } completion:nil];
         return;
     }
+    self.layer.shadowOpacity = 0;
     // A sung line fades back to dim rather than dropping its fill at once, and its words sink back
     // on a spring slow enough to still be seen doing it.
     [UIView animateWithDuration:0.9 delay:0 usingSpringWithDamping:1 initialSpringVelocity:0
@@ -1091,11 +1097,11 @@ typedef struct {
     if (!self) return nil;
     self.hidden = YES;
     _focus = _openBreak = -1;
-    _fontSize = kFontSize;
+    _fontSize = SGRLyricsStyleFontSize();
     _margin = kMargin;
-    _lineGap = kLineGap;
+    _lineGap = SGRLyricsStyleLineGap();
     _blurPerLine = kBlurPerLine;
-    _maxBlur = kMaxBlur;
+    _maxBlur = SGRLyricsStyleBlur();
     _shown = [NSMutableDictionary dictionary];
     _sightArrangement = NSUIntegerMax;
     _fade = [CAGradientLayer layer];
@@ -1426,6 +1432,8 @@ typedef struct {
 - (void)restyle {
     [self offerExtras];
     _fontSize = SGRLyricsStyleFontSize();
+    _lineGap = SGRLyricsStyleLineGap();
+    _maxBlur = SGRLyricsStyleBlur();
     if (!_lines || !_tops || _builtWidth <= 0) return;   // the next build picks the style up
     SGRKaraokeStyle *style = [self styleNow];
     NSArray<SGKaraokeLine *> *lines = _lines;
@@ -1610,7 +1618,7 @@ typedef struct {
     CGPoint center = CGPointMake(view.right ? CGRectGetMaxX(frame) : _margin, CGRectGetMidY(frame));
     CGFloat scale = distance == 0 ? 1 : kDimScale;
     CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-    view.blur = distance == 0 || _browsing ? 0 : MIN(_maxBlur, distance * _blurPerLine);
+    view.blur = distance == 0 || _browsing ? 0 : MIN(SGRLyricsStyleBlur(), distance * _blurPerLine);
     BOOL near = CGRectIntersectsRect(CGRectInset(self.bounds, 0, -height / 2), frame)
              || CGRectIntersectsRect(CGRectInset(self.bounds, 0, -height / 2), view.frame);
     if (!animated || !near) {
