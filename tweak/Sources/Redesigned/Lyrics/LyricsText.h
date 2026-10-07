@@ -33,11 +33,20 @@ SGModRow *SGRLyricsTextSizesRow(void);
 #define SGRKeyLyricsStyle @"spotifyglass.redesign.lyricsStyle"
 #define SGRKeyLyricsStyleFontSize @"spotifyglass.redesign.lyricsStyleFontSize"
 #define SGRKeyLyricsStyleFontWeight @"spotifyglass.redesign.lyricsStyleFontWeight"
+#define SGRKeyLyricsStyleLineGap @"spotifyglass.redesign.lyricsStyleLineGap"
+#define SGRKeyLyricsStyleDim @"spotifyglass.redesign.lyricsStyleDim"
+#define SGRKeyLyricsStyleBlur @"spotifyglass.redesign.lyricsStyleBlur"
+#define SGRKeyLyricsStyleBloom @"spotifyglass.redesign.lyricsStyleBloom"
 
 CGFloat SGRLyricsStyleFontSize(void);
 CGFloat SGRLyricsStyleFontWeight(void);
+CGFloat SGRLyricsStyleLineGap(void);
+CGFloat SGRLyricsStyleDim(void);
+CGFloat SGRLyricsStyleBlur(void);
+CGFloat SGRLyricsStyleBloom(void);
 SGModRow *SGRLyricsStyleRow(void);
 SGModRow *SGRLyricsStyleTuneRow(void);
 SGModRow *SGRLyricsStylePreviewRow(void);
+SGModRow *SGRLyricsStyleCustomizeRow(void);
 // Landscape lyrics' switch (LandscapeLyrics.h): the full screen lyrics page turns with the phone.
 SGModRow *SGRLyricsLandscapeRow(void);
