@@ -1,0 +1,233 @@
+diff --git a/tweak/Sources/App/Pages.m b/tweak/Sources/App/Pages.m
+--- a/tweak/Sources/App/Pages.m
++++ b/tweak/Sources/App/Pages.m
+@@ -67,7 +67,7 @@ static void offerRestart(BOOL on) {
+     if (!redesigned) [more insertObject:SGGlassLyricsRow() atIndex:0];
+     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObject:SGLyricsSourcesSection(redesigned)];
+     if (redesigned) {
+-        [sections addObject:SGSection(@"Display", @[SGRLyricsStylePreviewRow(), SGLyricsWordTimingRow(), SGRLyricsStyleRow(), SGRLyricsStyleTuneRow(), SGRLyricsTextSizesRow(), SGRLyricsLandscapeRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
++        [sections addObject:SGSection(@"Display", @[SGRLyricsStyleCustomizeRow(), SGRLyricsLandscapeRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
+     }
+     [sections addObject:SGSection(nil, more)];
+     return [[SGModPage alloc] initWithTitle:@"Lyrics" intro:SGRestartNote sections:sections footer:nil];
+
+diff --git a/tweak/Sources/Redesigned/Lyrics/LyricsText.h b/tweak/Sources/Redesigned/Lyrics/LyricsText.h
+--- a/tweak/Sources/Redesigned/Lyrics/LyricsText.h
++++ b/tweak/Sources/Redesigned/Lyrics/LyricsText.h
+@@ -33,11 +33,20 @@ SGModRow *SGRLyricsTextSizesRow(void);
+ #define SGRKeyLyricsStyle @"spotifyglass.redesign.lyricsStyle"
+ #define SGRKeyLyricsStyleFontSize @"spotifyglass.redesign.lyricsStyleFontSize"
+ #define SGRKeyLyricsStyleFontWeight @"spotifyglass.redesign.lyricsStyleFontWeight"
++#define SGRKeyLyricsStyleLineGap @"spotifyglass.redesign.lyricsStyleLineGap"
++#define SGRKeyLyricsStyleDim @"spotifyglass.redesign.lyricsStyleDim"
++#define SGRKeyLyricsStyleBlur @"spotifyglass.redesign.lyricsStyleBlur"
++#define SGRKeyLyricsStyleBloom @"spotifyglass.redesign.lyricsStyleBloom"
+
+ CGFloat SGRLyricsStyleFontSize(void);
+ CGFloat SGRLyricsStyleFontWeight(void);
++CGFloat SGRLyricsStyleLineGap(void);
++CGFloat SGRLyricsStyleDim(void);
++CGFloat SGRLyricsStyleBlur(void);
++CGFloat SGRLyricsStyleBloom(void);
+ SGModRow *SGRLyricsStyleRow(void);
+ SGModRow *SGRLyricsStyleTuneRow(void);
+ SGModRow *SGRLyricsStylePreviewRow(void);
++SGModRow *SGRLyricsStyleCustomizeRow(void);
+ // Landscape lyrics' switch (LandscapeLyrics.h): the full screen lyrics page turns with the phone.
+ SGModRow *SGRLyricsLandscapeRow(void);
+
+diff --git a/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m b/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
+--- a/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
++++ b/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
+@@ -170,6 +170,11 @@ static CGFloat SGRLyricsStyleDefaultFontWeight(void) {
+     return UIFontWeightBold;
+ }
+
++static CGFloat SGRLyricsStyleDefaultLineGap(void) { return 24.0; }
++static CGFloat SGRLyricsStyleDefaultDim(void) { return 0.30; }
++static CGFloat SGRLyricsStyleDefaultBlur(void) { return 6.0; }
++static CGFloat SGRLyricsStyleDefaultBloom(void) { return 0.0; }
++
+ CGFloat SGRLyricsStyleFontSize(void) {
+     double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleFontSize];
+     return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultFontSize();
+@@ -180,25 +185,43 @@ CGFloat SGRLyricsStyleFontWeight(void) {
+     return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultFontWeight();
+ }
+
++CGFloat SGRLyricsStyleLineGap(void) {
++    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleLineGap];
++    return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultLineGap();
++}
++CGFloat SGRLyricsStyleDim(void) {
++    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleDim];
++    return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultDim();
++}
++CGFloat SGRLyricsStyleBlur(void) {
++    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleBlur];
++    return value >= 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultBlur();
++}
++CGFloat SGRLyricsStyleBloom(void) {
++    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleBloom];
++    return value >= 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultBloom();
++}
++
+ static void SGRSetLyricsStylePreset(NSInteger preset) {
+-    CGFloat size = 30.0;
+-    CGFloat weight = UIFontWeightBold;
++    CGFloat size = 30.0, weight = UIFontWeightBold, gap = 24.0, dim = 0.30, blur = 6.0, bloom = 0.0;
+
+     switch (preset) {
+         case 1: // Subtle
+-            size = 27.0;
+-            weight = UIFontWeightRegular;
++            size = 27.0; weight = UIFontWeightRegular; gap = 20.0; dim = 0.22; blur = 4.0;
+             break;
+         case 2: // Bold
+-            size = 33.0;
+-            weight = UIFontWeightBlack;
++            size = 33.0; weight = UIFontWeightBlack; gap = 28.0; dim = 0.35; blur = 8.0; bloom = 35.0;
+             break;
+         default: // Default
+             break;
+     }
+
+     [NSUserDefaults.standardUserDefaults setDouble:size forKey:SGRKeyLyricsStyleFontSize];
+     [NSUserDefaults.standardUserDefaults setDouble:weight forKey:SGRKeyLyricsStyleFontWeight];
++    [NSUserDefaults.standardUserDefaults setDouble:gap forKey:SGRKeyLyricsStyleLineGap];
++    [NSUserDefaults.standardUserDefaults setDouble:dim forKey:SGRKeyLyricsStyleDim];
++    [NSUserDefaults.standardUserDefaults setDouble:blur forKey:SGRKeyLyricsStyleBlur];
++    [NSUserDefaults.standardUserDefaults setDouble:bloom forKey:SGRKeyLyricsStyleBloom];
+     [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
+ }
+
+@@ -216,30 +239,36 @@ static void SGRSetLyricsStylePreset(NSInteger preset) {
+     return SGViewRow([SGRLyricsStylePreview new], kLyricsStylePreviewHeight);
+ }
+
+-SGModRow *SGRLyricsStyleTuneRow(void) {
+-    SGModRow *row = SGPageRow(@"Fine-tune style", ^{
+-        SGModPage *page = [[SGModPage alloc] initWithTitle:@"Fine-tune style"
+-                                                      intro:@"Adjust the lyrics appearance. Changes apply immediately."
+-                                                   sections:@[
+-            SGSection(nil, @[
+-                SGSliderRow(@"Size", @"Overall lyric size", 20.0, 44.0, 1.0,
+-                            ^double { return SGRLyricsStyleFontSize(); },
+-                            ^(double value) {
+-                                [NSUserDefaults.standardUserDefaults setDouble:value forKey:SGRKeyLyricsStyleFontSize];
+-                                [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
+-                            },
+-                            ^NSString *(double value) { return [NSString stringWithFormat:@"%.0f pt", value]; }),
+-
+-                SGSliderRow(@"Weight", @"Font weight", UIFontWeightUltraLight, UIFontWeightBlack, 0.05,
+-                            ^double { return SGRLyricsStyleFontWeight(); },
+-                            ^(double value) {
+-                                [NSUserDefaults.standardUserDefaults setDouble:value forKey:SGRKeyLyricsStyleFontWeight];
+-                                [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
+-                            },
+-                            ^NSString *(double value) { return [NSString stringWithFormat:@"%.2f", value]; })
+-            ])
+-        ] footer:nil];
++static void SGRLyricsStyleSet(CGFloat value, NSString *key) {
++    [NSUserDefaults.standardUserDefaults setDouble:value forKey:key];
++    [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil];
++}
++static SGModRow *SGRLyricsStyleSlider(NSString *title, NSString *detail, double min, double max, double step,
++                                       NSString *key, double (^getter)(void), NSString *(^formatter)(double)) {
++    return SGSliderRow(title, detail, min, max, step, getter, ^(double value) {
++        SGRLyricsStyleSet((CGFloat)value, key);
++    }, formatter);
++}
++SGModRow *SGRLyricsStyleTuneRow(void) { return SGRLyricsStyleCustomizeRow(); }
++SGModRow *SGRLyricsStyleCustomizeRow(void) {
++    return SGPageRow(@"Customize lyrics", ^{
++        SGModPage *page = [[SGModPage alloc] initWithTitle:@"Customize lyrics"
++            intro:@"Changes apply immediately."
++            sections:@[
++                SGSection(nil, @[SGRLyricsStylePreviewRow()]),
++                SGSection(@"Text", @[
++                    SGRLyricsStyleSlider(@"Size", @"Overall lyric size", 20.0, 44.0, 1.0, SGRKeyLyricsStyleFontSize, ^double { return SGRLyricsStyleFontSize(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.0f pt", v]; }),
++                    SGRLyricsStyleSlider(@"Weight", @"Font weight", UIFontWeightUltraLight, UIFontWeightBlack, 0.05, SGRKeyLyricsStyleFontWeight, ^double { return SGRLyricsStyleFontWeight(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.2f", v]; }),
++                    SGRLyricsStyleSlider(@"Line spacing", @"Space between lyric lines", 8.0, 44.0, 1.0, SGRKeyLyricsStyleLineGap, ^double { return SGRLyricsStyleLineGap(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.0f pt", v]; }),
++                    SGRLyricsStyleSlider(@"Inactive opacity", @"Brightness of lyrics that are not being sung", 0.10, 0.70, 0.01, SGRKeyLyricsStyleDim, ^double { return SGRLyricsStyleDim(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.0f%%", v * 100.0]; })
++                ]),
++                SGSection(@"Effects", @[
++                    SGRLyricsStyleSlider(@"Distant blur", @"Blur on lines farther from the current line", 0.0, 12.0, 0.5, SGRKeyLyricsStyleBlur, ^double { return SGRLyricsStyleBlur(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.1f", v]; }),
++                    SGRLyricsStyleSlider(@"Bloom / glare", @"Glow on the sung line", 0.0, 100.0, 1.0, SGRKeyLyricsStyleBloom, ^double { return SGRLyricsStyleBloom(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.0f%%", v]; })
++                ]),
++                SGSection(@"Preset", @[SGRLyricsStyleRow()]),
++                SGSection(@"Lyrics", @[SGRLyricsTextSizesRow(), SGLyricsWordTimingRow()])
++            ] footer:nil];
+         return page;
+     });
+-    return row;
+ }
+
+diff --git a/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m b/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
+--- a/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
++++ b/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
+@@ -689,7 +689,7 @@ - (instancetype)initWithLine:(SGKaraokeLine *)line width:(CGFloat)width style:(S
+         _translation.numberOfLines = 0;
+         _translation.font = style.translation;
+         _translation.textColor = UIColor.whiteColor;
+-        _translation.alpha = kDimAlpha;
++        _translation.alpha = SGRLyricsStyleDim();
+         _translation.textAlignment = _right ? NSTextAlignmentRight : NSTextAlignmentLeft;
+         _translation.text = line.translation;
+         [self addSubview:_translation];
+@@ -738,9 +738,14 @@ - (void)setActive:(BOOL)active {
+     NSUInteger generation = ++_generation;
+     if (_translation) {
+         [UIView animateWithDuration:active ? 0.3 : 0.5 delay:0 options:UIViewAnimationOptionBeginFromCurrentState
+-                         animations:^{ self->_translation.alpha = active ? kTranslationLit : kDimAlpha; } completion:nil];
++                         animations:^{ self->_translation.alpha = active ? kTranslationLit : SGRLyricsStyleDim(); } completion:nil];
+     }
+     if (active) {
++        CGFloat bloom = SGRLyricsStyleBloom() / 100.0;
++        self.layer.shadowColor = UIColor.whiteColor.CGColor;
++        self.layer.shadowOpacity = (float)MIN(0.8, bloom * 0.8);
++        self.layer.shadowRadius = 10.0 * bloom;
++        self.layer.shadowOffset = CGSizeZero;
+         NSMutableArray<SGRKaraokeWordView *> *whole = [NSMutableArray array];
+         for (SGRKaraokeWordView *word in _words) {
+             [word.layer removeAllAnimations];
+@@ -758,6 +763,7 @@ - (void)setActive:(BOOL)active {
+                          animations:^{ for (SGRKaraokeWordView *word in whole) word.lit.alpha = 1; } completion:nil];
+         return;
+     }
++    self.layer.shadowOpacity = 0;
+     // A sung line fades back to dim rather than dropping its fill at once, and its words sink back
+     // on a spring slow enough to still be seen doing it.
+     [UIView animateWithDuration:0.9 delay:0 usingSpringWithDamping:1 initialSpringVelocity:0
+@@ -1091,11 +1097,11 @@ - (instancetype)initWithFrame:(CGRect)frame {
+     if (!self) return nil;
+     self.hidden = YES;
+     _focus = _openBreak = -1;
+-    _fontSize = kFontSize;
++    _fontSize = SGRLyricsStyleFontSize();
+     _margin = kMargin;
+-    _lineGap = kLineGap;
++    _lineGap = SGRLyricsStyleLineGap();
+     _blurPerLine = kBlurPerLine;
+-    _maxBlur = kMaxBlur;
++    _maxBlur = SGRLyricsStyleBlur();
+     _shown = [NSMutableDictionary dictionary];
+     _sightArrangement = NSUIntegerMax;
+@@ -1426,6 +1432,8 @@ - (SGRKaraokeStyle *)styleNow {
+ - (void)restyle {
+     [self offerExtras];
+     _fontSize = SGRLyricsStyleFontSize();
++    _lineGap = SGRLyricsStyleLineGap();
++    _maxBlur = SGRLyricsStyleBlur();
+     if (!_lines || !_tops || _builtWidth <= 0) return;   // the next build picks the style up
+     SGRKaraokeStyle *style = [self styleNow];
+     NSArray<SGKaraokeLine *> *lines = _lines;
+@@ -1610,7 +1618,7 @@ - (void)placeLine:(SGRKaraokeLineView *)view at:(NSInteger)index animated:(BOOL)
+     CGPoint center = CGPointMake(view.right ? CGRectGetMaxX(frame) : _margin, CGRectGetMidY(frame));
+     CGFloat scale = distance == 0 ? 1 : kDimScale;
+     CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
+-    view.blur = distance == 0 || _browsing ? 0 : MIN(_maxBlur, distance * _blurPerLine);
++    view.blur = distance == 0 || _browsing ? 0 : MIN(SGRLyricsStyleBlur(), distance * _blurPerLine);
+     BOOL near = CGRectIntersectsRect(CGRectInset(self.bounds, 0, -height / 2), frame)
+              || CGRectIntersectsRect(CGRectInset(self.bounds, 0, -height / 2), view.frame);
+     if (!animated || !near) {
