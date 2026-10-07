@@ -1,0 +1,153 @@
+diff --git a/tweak/Sources/Shared/Sing/SGSingDSP.h b/tweak/Sources/Shared/Sing/SGSingDSP.h
+--- a/tweak/Sources/Shared/Sing/SGSingDSP.h
++++ b/tweak/Sources/Shared/Sing/SGSingDSP.h
+@@ -20,5 +20,9 @@ void SGSingMixerSetVocalsOnly(SGSingMixer *mixer, float level, bool vocalsOnly);
+ // output = instrumental gain * (original - vocals) + vocal gain * vocals.
+ void SGSingMixerProcess(SGSingMixer *mixer, const float *original, const float *vocals, float *output, uint32_t frames);
+ // A 120 ms ramp to the aligned original, no clock change: SGSingReserveFrames at 44.1 kHz.
+ void SGSingMixerBypass(SGSingMixer *mixer);
++// Spatial Voice focuses the separated vocal stem toward the center/front image without
++// changing the existing Sing level curve.
++void SGSingDSPSetSpatialVoice(bool enabled);
++bool SGSingDSPSpatialVoice(void);
+ 
+diff --git a/tweak/Sources/Shared/Sing/SGSingDSP.m b/tweak/Sources/Shared/Sing/SGSingDSP.m
+--- a/tweak/Sources/Shared/Sing/SGSingDSP.m
++++ b/tweak/Sources/Shared/Sing/SGSingDSP.m
+@@ -1,8 +1,13 @@
+ #include "SGSingDSP.h"
+ #include <math.h>
++#include <stdatomic.h>
+ 
+ static const double kLevelRampSeconds = 0.030;
+ static const double kBypassRampSeconds = 0.120;
++static atomic_bool sg_spatialVoice = false;
++
++void SGSingDSPSetSpatialVoice(bool enabled) { atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed); }
++bool SGSingDSPSpatialVoice(void) { return atomic_load_explicit(&sg_spatialVoice, memory_order_relaxed); }
+ 
+ static void ramp(SGSingMixer *m,
+                  float to,
+@@ -84,10 +89,20 @@ void SGSingMixerProcess(SGSingMixer *m,
+             size_t at = (size_t)i * 2 + c;
+ 
+             float source = isfinite(original[at]) ? original[at] : 0;
+             float vocal = isfinite(vocals[at]) ? vocals[at] : 0;
+ 
++            if (SGSingDSPSpatialVoice()) {
++                size_t leftAt = (size_t)i * 2;
++                size_t rightAt = leftAt + 1;
++                float left = isfinite(vocals[leftAt]) ? vocals[leftAt] : 0;
++                float right = isfinite(vocals[rightAt]) ? vocals[rightAt] : 0;
++                float mid = 0.5f * (left + right);
++                float side = 0.5f * (left - right);
++                vocal = c == 0 ? mid + side * 0.25f : mid - side * 0.25f;
++            }
++
+             // instrumental = original - vocal
+             float value =
+                 m->instrumental * (source - vocal)
+                 + m->gain * vocal;
+ 
+diff --git a/tweak/Sources/Shared/Sing/SGSingController.h b/tweak/Sources/Shared/Sing/SGSingController.h
+--- a/tweak/Sources/Shared/Sing/SGSingController.h
++++ b/tweak/Sources/Shared/Sing/SGSingController.h
+@@ -24,7 +24,11 @@ float SGSingReducedLevel(void); // the last level below 100 %, which turning Sing on goes back to
+ void SGSingSetVocalLevel(float level);
+ // Vocals only: the instrumental is taken out and the vocals play at full, whatever the level. Sing's switch
+ // still decides whether it runs; this changes what it plays. Safe before Sing is configured.
+ BOOL SGSingVocalsOnly(void);
+ void SGSingSetVocalsOnly(BOOL vocalsOnly);
++// Spatial Voice focuses the separated vocal stem in the center/front image while leaving
++// the existing 0–110% Sing level mapping unchanged.
++BOOL SGSingSpatialVoice(void);
++void SGSingSetSpatialVoice(BOOL enabled);
+ void SGSingSetEnabled(BOOL enabled);
+ 
+diff --git a/tweak/Sources/Shared/Sing/SGSingController.m b/tweak/Sources/Shared/Sing/SGSingController.m
+--- a/tweak/Sources/Shared/Sing/SGSingController.m
++++ b/tweak/Sources/Shared/Sing/SGSingController.m
+@@ -3,6 +3,7 @@
+ #import "SGSingAudio.h"
+ #import "SGSingFormat.h"
+ #import "SGSingModel.h"
++#import "SGSingDSP.h"
+ #import "SGStemWorker.h"
+ #import "Shared/Audio/SGAudioPipeline.h"
+ #import "Shared/Player/PlayerState.h"
+@@ -467,10 +468,15 @@ void SGSingSetVocalLevel(float level) {
+ }
+ BOOL SGSingVocalsOnly(void) { return sg_vocalsOnly; }
+ void SGSingSetVocalsOnly(BOOL vocalsOnly) {
+     if (vocalsOnly == sg_vocalsOnly) return;
+     sg_vocalsOnly = vocalsOnly;
+     if (sg_configured && sg_controller.session) SGSingStreamSetVocalsOnly(stream(sg_controller.session), vocalsOnly);
+     [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
+ }
++BOOL SGSingSpatialVoice(void) { return SGSingDSPSpatialVoice(); }
++void SGSingSetSpatialVoice(BOOL enabled) {
++    SGSingDSPSetSpatialVoice(enabled);
++    [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
++}
+ void SGSingSetEnabled(BOOL enabled) {
+ 
+diff --git a/tweak/Sources/Redesigned/Lyrics/Sing.h b/tweak/Sources/Redesigned/Lyrics/Sing.h
+--- a/tweak/Sources/Redesigned/Lyrics/Sing.h
++++ b/tweak/Sources/Redesigned/Lyrics/Sing.h
+@@ -4,13 +4,16 @@
+ 
+ #define SGRKeySing @"spotifyglass.redesign.sing"   // off until switched on
+ #define SGRKeySingVocalsOnly @"spotifyglass.redesign.sing.vocalsonly"   // off until switched on
++#define SGRKeySingSpatialVoice @"spotifyglass.redesign.sing.spatialVoice"   // off until switched on
+ 
+ // Hands the switch to Shared/Sing while the redesign runs (Sing.x), at launch and as it is turned:
+ // the microphone comes and goes at once, no restart.
+ void SGRSingApplySwitch(void);
+ // The vocals only switch, handed over the same way, at launch and as it is turned.
+ void SGRSingApplyVocalsOnly(void);
++// The Spatial Voice switch, handed over the same way.
++void SGRSingApplySpatialVoice(void);
+ 
+ // SingSettings.m: Mod Settings > Karaoke, with the switch and the voice model's download, and what its row on
+ // the main page says beside the chevron (Off, On, No model, the download's percentage).
+ 
+diff --git a/tweak/Sources/Redesigned/Lyrics/Sing.x b/tweak/Sources/Redesigned/Lyrics/Sing.x
+--- a/tweak/Sources/Redesigned/Lyrics/Sing.x
++++ b/tweak/Sources/Redesigned/Lyrics/Sing.x
+@@ -11,9 +11,14 @@ void SGRSingApplyVocalsOnly(void) {
+     if (!SGRedesignedUI()) return;
+     SGSingSetVocalsOnly(SGFlag(SGRKeySingVocalsOnly, NO));
+ }
+ 
++void SGRSingApplySpatialVoice(void) {
++    if (!SGRedesignedUI()) return;
++    SGSingSetSpatialVoice(SGFlag(SGRKeySingSpatialVoice, NO));
++}
++
+ %ctor {
+     if (!SGRedesignedUI()) return;
+-    dispatch_async(dispatch_get_main_queue(), ^{ SGRSingApplySwitch(); SGRSingApplyVocalsOnly(); });
++    dispatch_async(dispatch_get_main_queue(), ^{ SGRSingApplySwitch(); SGRSingApplyVocalsOnly(); SGRSingApplySpatialVoice(); });
+ }
+ 
+diff --git a/tweak/Sources/Redesigned/Lyrics/SingSettings.m b/tweak/Sources/Redesigned/Lyrics/SingSettings.m
+--- a/tweak/Sources/Redesigned/Lyrics/SingSettings.m
++++ b/tweak/Sources/Redesigned/Lyrics/SingSettings.m
+@@ -110,6 +110,10 @@ static SGModSection *karaokeSection(void) {
+     if (!SGSingSupported()) return SGNotedSection(@"Karaoke", @[unavailableRow()], footer());
+     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
+     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
++    SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep the vocals focused in front", SGRKeySingSpatialVoice);
++    spatial.info = @"Centers the separated vocal stem while retaining a small amount of stereo ambience. "
++                   @"The instrumental is left untouched, and the Sing slider still controls the mix from 0 to 110 percent.";
++    spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); };
+     SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
+     model.progress = ^double {
+         return SGSingModelCurrentState() == SGSingModelDownloading ? (double)SGSingModelReceived() / SGSingModelSize() : -1;
+@@ -131,5 +135,5 @@ static SGModSection *karaokeSection(void) {
+         SGSingModelState state = SGSingModelCurrentState();
+         return state == SGSingModelInstalled || (state == SGSingModelMissing && SGSingModelReceived() > 0);
+     };
+-    return SGNotedSection(@"Karaoke", @[sing, model, download, cancel, remove], footer());
++    return SGNotedSection(@"Karaoke", @[sing, spatial, model, download, cancel, remove], footer());
+ }

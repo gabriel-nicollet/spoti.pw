@@ -1,0 +1,60 @@
+diff --git a/tweak/Sources/Redesigned/Player/PlayerMenu.x b/tweak/Sources/Redesigned/Player/PlayerMenu.x
+--- a/tweak/Sources/Redesigned/Player/PlayerMenu.x
++++ b/tweak/Sources/Redesigned/Player/PlayerMenu.x
+@@ -6,5 +6,6 @@
+ #import "Core/SGCore.h"
+ #import "Redesigned/Kit/SGRKit.h"
+ #import "Shared/Player/SpeedPitch.h"
++#import "Shared/Sing/SGSingController.h"
+ #import "Player.h"
+ 
+@@ -680,7 +681,9 @@ static UIAction *actionFor(SGRPlayerMenuTakeover *t, SGRPlayerMenuSpotifyRow *row, const SGRPlayerMenuKnownRow *known) {
+     return action;
+ }
+ 
++static UIMenu *menuFor(SGRPlayerMenuTakeover *t);
++
+ static UIAction *speedAndPitchAction(SGRPlayerMenuTakeover *t) {
+     __weak SGRPlayerMenuTakeover *weak = t;
+     UIAction *action = [UIAction actionWithTitle:@"Speed and pitch" image:symbol(@"slider.horizontal.3") identifier:nil handler:^(UIAction *sender) {
+         pick(weak, ^(SGRPlayerMenuTakeover *strong) { openSpeedPitch(strong); });
+@@ -688,5 +717,30 @@ static UIAction *speedAndPitchAction(SGRPlayerMenuTakeover *t) {
+     return action;
+ }
+ 
++static UIAction *spatialVoiceAction(SGRPlayerMenuTakeover *t) {
++    __weak SGRPlayerMenuTakeover *weak = t;
++    BOOL on = SGSingSpatialVoice();
++    UIAction *action = [UIAction actionWithTitle:@"Spatial Voice"
++                                           image:symbol(@"wave.3.right")
++                                      identifier:nil
++                                         handler:^(UIAction *sender) {
++        BOOL enabled = !SGSingSpatialVoice();
++        SGSetEnabled(SGRKeySingSpatialVoice, enabled);
++        SGRSingSetSpatialVoice(enabled);
++
++        SGRPlayerMenuTakeover *strong = weak;
++        if (strong.anchor && strong.shown && !strong.closed) {
++            UIMenu *menu = menuFor(strong);
++            [strong.anchor.contextMenuInteraction
++                updateVisibleMenuWithBlock:^UIMenu *(UIMenu *visible) {
++                return menu;
++            }];
++        }
++    }];
++    action.subtitle = on ? @"On" : @"Off";
++    action.state = on ? UIMenuElementStateOn : UIMenuElementStateOff;
++    return action;
++}
++
+ static UIMenu *menuFor(SGRPlayerMenuTakeover *t) {
+     NSArray<SGRPlayerMenuSpotifyRow *> *rows = t.rows ?: @[];
+@@ -715,7 +766,8 @@ static UIMenu *menuFor(SGRPlayerMenuTakeover *t) {
+         [main insertObject:tiles.lastObject atIndex:0];
+         [tiles removeLastObject];
+     }
+     [main addObject:speedAndPitchAction(t)];
++    if (SGSingSupported()) [main addObject:spatialVoiceAction(t)];
+     if (more.count == 1) {
+         [feedback addObject:more.firstObject];
+     } else if (more.count) {
