@@ -267,7 +267,7 @@ SGModRow *SGRLyricsStyleCustomizeRow(void) {
                     SGRLyricsStyleSlider(@"Bloom / glare", @"Glow on the sung line", 0.0, 100.0, 1.0, SGRKeyLyricsStyleBloom, ^double { return SGRLyricsStyleBloom(); }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.0f%%", v]; })
                 ]),
                 SGSection(@"Preset", @[SGRLyricsStyleRow()]),
-                SGSection(@"Lyrics", @[SGRLyricsTextSizesRow(), SGLyricsWordTimingRow()])
+                SGSection(@"Lyrics", @[SGRLyricsTextSizesRow()])
             ] footer:nil];
         return page;
     });

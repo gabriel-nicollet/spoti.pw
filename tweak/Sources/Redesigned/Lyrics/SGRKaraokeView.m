@@ -16,11 +16,11 @@
 #import "Shared/Haptics/Haptics.h"
 #import "Redesigned/Kit/SGRTokens.h"
 
-static const CGFloat kFontSize = 30, kMargin = 24, kLineGap = 24, kRowTighten = 2;
+static const CGFloat kMargin = 24, kRowTighten = 2;
 static const CGFloat kDimAlpha = 0.3, kFillEdge = 22, kLift = 2.5, kDimScale = 0.97;
 static const CGFloat kAnchor = 0.28;   // where the sung line rests, as a share of the height
 static const CGFloat kEdgeFade = 0.1;  // the lines fade out over this share at the top and bottom
-static const CGFloat kBlurPerLine = 1.4, kMaxBlur = 6;
+static const CGFloat kBlurPerLine = 1.4;
 // The (oh, aye) hanging under a line: smaller, a little dimmer, and just clear of it.
 static const CGFloat kBackingScale = 0.62, kBackingAlpha = 0.8, kBackingGap = 4;
 // The mark of a line Genius explains: a bubble after it for the artist's own word, a dotted underline
