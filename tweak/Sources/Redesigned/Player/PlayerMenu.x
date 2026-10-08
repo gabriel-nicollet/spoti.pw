@@ -700,7 +700,7 @@ static UIAction *spatialVoiceAction(SGRPlayerMenuTakeover *t) {
                                       identifier:nil
                                          handler:^(UIAction *sender) {
         BOOL enabled = !SGSingSpatialVoice();
-        SGSetEnabled(SGKeySingSpatialVoice, enabled);
+        SGSetEnabled(SGRKeySingSpatialVoice, enabled);
         SGSingSetSpatialVoice(enabled);
 
         SGRPlayerMenuTakeover *strong = weak;
