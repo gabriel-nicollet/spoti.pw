@@ -17,6 +17,7 @@
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Shared/Player/SpeedPitch.h"
+#import "Shared/Sing/SGSingController.h"
 #import "Player.h"
 
 // A sheet this soon after the ⋯'s tap is the player's.
@@ -679,12 +680,39 @@ static UIAction *actionFor(SGRPlayerMenuTakeover *t, SGRPlayerMenuSpotifyRow *ro
     return action;
 }
 
+static UIMenu *menuFor(SGRPlayerMenuTakeover *t);
+
 static UIAction *speedAndPitchAction(SGRPlayerMenuTakeover *t) {
     __weak SGRPlayerMenuTakeover *weak = t;
     UIAction *action = [UIAction actionWithTitle:@"Speed and pitch" image:symbol(@"slider.horizontal.3") identifier:nil handler:^(UIAction *sender) {
         pick(weak, ^(SGRPlayerMenuTakeover *strong) { openSpeedPitch(strong); });
     }];
     action.subtitle = SGSpeedPitchSummary();
+    return action;
+}
+
+static UIAction *spatialVoiceAction(SGRPlayerMenuTakeover *t) {
+    __weak SGRPlayerMenuTakeover *weak = t;
+    BOOL on = SGSingSpatialVoice();
+    UIAction *action = [UIAction actionWithTitle:@"Spatial Voice"
+                                           image:symbol(@"wave.3.right")
+                                      identifier:nil
+                                         handler:^(UIAction *sender) {
+        BOOL enabled = !SGSingSpatialVoice();
+        SGSetEnabled(SGRKeySingSpatialVoice, enabled);
+        SGRSingSetSpatialVoice(enabled);
+
+        SGRPlayerMenuTakeover *strong = weak;
+        if (strong.anchor && strong.shown && !strong.closed) {
+            UIMenu *menu = menuFor(strong);
+            [strong.anchor.contextMenuInteraction
+                updateVisibleMenuWithBlock:^UIMenu *(UIMenu *visible) {
+                return menu;
+            }];
+        }
+    }];
+    action.subtitle = on ? @"On" : @"Off";
+    action.state = on ? UIMenuElementStateOn : UIMenuElementStateOff;
     return action;
 }
 
@@ -715,6 +743,7 @@ static UIMenu *menuFor(SGRPlayerMenuTakeover *t) {
         [tiles removeLastObject];
     }
     [main addObject:speedAndPitchAction(t)];
+    if (SGSingSupported()) [main addObject:spatialVoiceAction(t)];
     if (more.count == 1) {
         [feedback addObject:more.firstObject];
     } else if (more.count) {

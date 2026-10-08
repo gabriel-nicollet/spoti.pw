@@ -1,8 +1,13 @@
 #include "SGSingDSP.h"
 #include <math.h>
+#include <stdatomic.h>
 
 static const double kLevelRampSeconds = 0.030;
 static const double kBypassRampSeconds = 0.120;
+static atomic_bool sg_spatialVoice = false;
+
+void SGSingDSPSetSpatialVoice(bool enabled) { atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed); }
+bool SGSingDSPSpatialVoice(void) { return atomic_load_explicit(&sg_spatialVoice, memory_order_relaxed); }
 
 static void ramp(SGSingMixer *m,
                  float to,
@@ -106,6 +111,16 @@ void SGSingMixerProcess(SGSingMixer *m,
 
             float source = isfinite(original[at]) ? original[at] : 0;
             float vocal = isfinite(vocals[at]) ? vocals[at] : 0;
+
+            if (SGSingDSPSpatialVoice()) {
+                size_t leftAt = (size_t)i * 2;
+                size_t rightAt = leftAt + 1;
+                float left = isfinite(vocals[leftAt]) ? vocals[leftAt] : 0;
+                float right = isfinite(vocals[rightAt]) ? vocals[rightAt] : 0;
+                float mid = 0.5f * (left + right);
+                float side = 0.5f * (left - right);
+                vocal = c == 0 ? mid + side * 0.25f : mid - side * 0.25f;
+            }
 
             // instrumental = original - vocal
             float value =

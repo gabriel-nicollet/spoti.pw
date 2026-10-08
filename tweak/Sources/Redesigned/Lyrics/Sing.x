@@ -14,7 +14,12 @@ void SGRSingApplyVocalsOnly(void) {
     SGSingSetVocalsOnly(SGFlag(SGRKeySingVocalsOnly, NO));
 }
 
+void SGRSingApplySpatialVoice(void) {
+    if (!SGRedesignedUI()) return;
+    SGSingSetSpatialVoice(SGFlag(SGRKeySingSpatialVoice, NO));
+}
+
 %ctor {
     if (!SGRedesignedUI()) return;
-    dispatch_async(dispatch_get_main_queue(), ^{ SGRSingApplySwitch(); SGRSingApplyVocalsOnly(); });
+    dispatch_async(dispatch_get_main_queue(), ^{ SGRSingApplySwitch(); SGRSingApplyVocalsOnly(); SGRSingApplySpatialVoice(); });
 }

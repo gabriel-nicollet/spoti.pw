@@ -111,6 +111,10 @@ static SGModSection *karaokeSection(void) {
     if (!SGSingSupported()) return SGNotedSection(@"Karaoke", @[unavailableRow()], footer());
     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
+    SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep the vocals focused in front", SGRKeySingSpatialVoice);
+    spatial.info = @"Centers the separated vocal stem while retaining a small amount of stereo ambience. "
+                   @"The instrumental is left untouched, and the Sing slider still controls the mix from 0 to 110 percent.";
+    spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); };
     SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
     model.progress = ^double {
         return SGSingModelCurrentState() == SGSingModelDownloading ? (double)SGSingModelReceived() / SGSingModelSize() : -1;
@@ -131,7 +135,7 @@ static SGModSection *karaokeSection(void) {
         SGSingModelState state = SGSingModelCurrentState();
         return state == SGSingModelInstalled || (state == SGSingModelMissing && SGSingModelReceived() > 0);
     };
-    return SGNotedSection(@"Karaoke", @[sing, model, download, cancel, remove], footer());
+    return SGNotedSection(@"Karaoke", @[sing, spatial, model, download, cancel, remove], footer());
 }
 
 UIViewController *SGRKaraokeSettingsPage(void) {

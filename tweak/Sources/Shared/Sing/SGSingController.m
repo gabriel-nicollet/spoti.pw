@@ -3,6 +3,7 @@
 #import "SGSingAudio.h"
 #import "SGSingFormat.h"
 #import "SGSingModel.h"
+#import "SGSingDSP.h"
 #import "SGStemWorker.h"
 #import "Shared/Audio/SGAudioPipeline.h"
 #import "Shared/Player/PlayerState.h"
@@ -470,6 +471,11 @@ void SGSingSetVocalsOnly(BOOL vocalsOnly) {
     if (vocalsOnly == sg_vocalsOnly) return;
     sg_vocalsOnly = vocalsOnly;
     if (sg_configured && sg_controller.session) SGSingStreamSetVocalsOnly(stream(sg_controller.session), vocalsOnly);
+    [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
+}
+BOOL SGSingSpatialVoice(void) { return SGSingDSPSpatialVoice(); }
+void SGSingSetSpatialVoice(BOOL enabled) {
+    SGSingDSPSetSpatialVoice(enabled);
     [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
 }
 void SGSingSetEnabled(BOOL enabled) {
