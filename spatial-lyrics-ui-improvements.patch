@@ -1,0 +1,276 @@
+--- a/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
++++ b/tweak/Sources/Redesigned/Lyrics/LyricsTextSettings.m
+@@ -110,52 +110,134 @@
+ @interface SGRLyricsStylePreview : UIView
+ @end
+ 
+-@implementation SGRLyricsStylePreview
++@implementation SGRLyricsStylePreview {
++    CAGradientLayer *_gradient;
++    CADisplayLink *_link;
++    NSArray<NSString *> *_examples;
++    NSInteger _exampleIndex;
++    NSInteger _wordIndex;
++    CFTimeInterval _lastStep;
++}
+ 
+ - (instancetype)initWithFrame:(CGRect)frame {
+     if (!(self = [super initWithFrame:frame])) return nil;
+-    self.backgroundColor = UIColor.blackColor;
++
++    _examples = @[
++        @"Paper boats on a river of light",
++        @"Carry the words we forgot to say",
++        @"And watch you sabotage",
++        @"We are still finding our way home"
++    ];
++    _exampleIndex = 0;
++    _wordIndex = 0;
++    self.backgroundColor = UIColor.clearColor;
+     self.layer.cornerRadius = 24.0;
+     self.clipsToBounds = YES;
++
++    _gradient = [CAGradientLayer layer];
++    _gradient.colors = @[
++        (id)[UIColor colorWithRed:0.19 green:0.22 blue:0.43 alpha:1].CGColor,
++        (id)[UIColor colorWithRed:0.38 green:0.25 blue:0.42 alpha:1].CGColor,
++        (id)[UIColor colorWithRed:0.52 green:0.35 blue:0.27 alpha:1].CGColor
++    ];
++    _gradient.startPoint = CGPointMake(0.05, 0.15);
++    _gradient.endPoint = CGPointMake(0.95, 0.85);
++    [self.layer insertSublayer:_gradient atIndex:0];
++
+     [NSNotificationCenter.defaultCenter addObserver:self
+                                              selector:@selector(styleDidChange:)
+                                                  name:SGRLyricsTextDidChangeNotification
+                                                object:nil];
++
++    _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
++    _link.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
++    [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
++    _lastStep = CACurrentMediaTime();
+     return self;
+ }
+ 
+ - (void)dealloc {
+     [NSNotificationCenter.defaultCenter removeObserver:self];
++    [_link invalidate];
++}
++
++- (void)layoutSubviews {
++    [super layoutSubviews];
++    _gradient.frame = self.bounds;
+ }
+ 
+ - (void)styleDidChange:(NSNotification *)notification {
++    _exampleIndex = 0;
++    _wordIndex = 0;
++    _lastStep = CACurrentMediaTime();
++    [self setNeedsDisplay];
++}
++
++- (void)tick:(CADisplayLink *)link {
++    CFTimeInterval now = CACurrentMediaTime();
++    if (now - _lastStep < 0.34) return;
++    _lastStep = now;
++
++    NSArray<NSString *> *words = [_examples[_exampleIndex] componentsSeparatedByString:@" "];
++    _wordIndex++;
++    if (_wordIndex >= (NSInteger)words.count) {
++        _wordIndex = 0;
++        _exampleIndex = (_exampleIndex + 1) % (NSInteger)_examples.count;
++    }
+     [self setNeedsDisplay];
+ }
+ 
+ - (void)drawRect:(CGRect)rect {
+     CGFloat size = SGRLyricsStyleFontSize();
+     CGFloat weight = SGRLyricsStyleFontWeight();
+-
+-    UIFont *current = [UIFont systemFontOfSize:size weight:weight];
+-    UIFont *next = [UIFont systemFontOfSize:size * 0.67 weight:weight];
+-
+-    NSDictionary *currentAttributes = @{
+-        NSFontAttributeName: current,
+-        NSForegroundColorAttributeName: UIColor.whiteColor
++    CGFloat dim = SGRLyricsStyleDim();
++    CGFloat bloom = SGRLyricsStyleBloom() / 100.0;
++
++    NSString *currentText = _examples[_exampleIndex];
++    NSArray<NSString *> *words = [currentText componentsSeparatedByString:@" "];
++
++    UIFont *font = [UIFont systemFontOfSize:size weight:weight];
++    NSMutableAttributedString *current = [[NSMutableAttributedString alloc] initWithString:currentText];
++    NSRange range = NSMakeRange(0, current.length);
++    [current addAttribute:NSFontAttributeName value:font range:range];
++    [current addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:MAX(0.65, 1.0 - dim * 0.35)] range:range];
++
++    NSUInteger location = 0;
++    for (NSInteger i = 0; i < (NSInteger)words.count; i++) {
++        NSString *word = words[i];
++        NSRange wordRange = NSMakeRange(location, word.length);
++        if (i == _wordIndex) {
++            [current addAttribute:NSForegroundColorAttributeName
++                            value:UIColor.whiteColor
++                            range:wordRange];
++            if (bloom > 0) {
++                NSShadow *shadow = [NSShadow new];
++                shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.85, bloom)];
++                shadow.shadowBlurRadius = 8.0 + 12.0 * bloom;
++                shadow.shadowOffset = CGSizeZero;
++                [current addAttribute:NSShadowAttributeName value:shadow range:wordRange];
++            }
++        }
++        location += word.length + 1;
++    }
++
++    NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
++    paragraph.alignment = NSTextAlignmentLeft;
++    paragraph.lineBreakMode = NSLineBreakByWordWrapping;
++
++    CGRect currentRect = CGRectMake(24.0, 34.0, rect.size.width - 48.0, size * 2.8);
++    [current addAttribute:NSParagraphStyleAttributeName value:paragraph range:range];
++    [current drawInRect:currentRect];
++
++    NSString *nextText = _examples[(_exampleIndex + 1) % (NSInteger)_examples.count];
++    UIFont *nextFont = [UIFont systemFontOfSize:size * 0.62 weight:weight];
++    NSDictionary *nextAttributes = @{
++        NSFontAttributeName: nextFont,
++        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:MAX(0.16, dim * 0.9)]
+     };
+-    NSDictionary *nextAttributes = @{
+-        NSFontAttributeName: next,
+-        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]
+-    };
+-
+-    NSString *currentText = @"This is your lyric";
+-    NSString *nextText = @"A live preview of the style";
+-
+-    CGRect currentRect = CGRectMake(22.0, 48.0, rect.size.width - 44.0, size + 12.0);
+-    CGRect nextRect = CGRectMake(22.0, 48.0 + size + 20.0, rect.size.width - 44.0, size * 0.67 + 12.0);
+-
+-    [currentText drawInRect:currentRect withAttributes:currentAttributes];
+-    [nextText drawInRect:nextRect withAttributes:nextAttributes];
++    [nextText drawInRect:CGRectMake(24.0, CGRectGetMaxY(currentRect) - 10.0,
++                                    rect.size.width - 48.0, nextFont.lineHeight + 8.0)
++          withAttributes:nextAttributes];
+ }
+ 
+ @end
+--- a/tweak/Sources/Redesigned/Lyrics/LandscapeLyrics.x
++++ b/tweak/Sources/Redesigned/Lyrics/LandscapeLyrics.x
+@@ -48,12 +48,24 @@
+     if (!SGFlag(SGRKeyLyricsLandscape, NO) && onScreen) return;
+     UIWindowScene *scene = activeScene();
+     for (UIWindow *window in scene.windows) [window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
+-    if (!onScreen && scene && UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) {
+-        UIWindowSceneGeometryPreferencesIOS *upright =
+-            [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait];
+-        [scene requestGeometryUpdateWithPreferences:upright errorHandler:^(NSError *error) {
+-            SGLog(@"landscape lyrics: could not turn back upright: %@", error.localizedDescription);
+-        }];
++    if (!scene) return;
++
++    if (onScreen) {
++        if (@available(iOS 16.0, *)) {
++            UIWindowSceneGeometryPreferencesIOS *wide =
++                [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
++            [scene requestGeometryUpdateWithPreferences:wide errorHandler:^(NSError *error) {
++                SGLog(@"landscape lyrics: could not turn sideways: %@", error.localizedDescription);
++            }];
++        }
++    } else if (UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) {
++        if (@available(iOS 16.0, *)) {
++            UIWindowSceneGeometryPreferencesIOS *upright =
++                [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait];
++            [scene requestGeometryUpdateWithPreferences:upright errorHandler:^(NSError *error) {
++                SGLog(@"landscape lyrics: could not turn back upright: %@", error.localizedDescription);
++            }];
++        }
+     }
+ }
+ 
+--- a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyricsCover.m
++++ b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyricsCover.m
+@@ -3,6 +3,7 @@
+ // drawn when the line changes (a few times a minute), not an animation: iOS gives a now playing artwork no per-word clock.
+ #import <CoreImage/CoreImage.h>
+ #import "LockScreenLyrics.h"
++#import "Redesigned/Lyrics/LyricsText.h"
+ 
+ @implementation SGLyricsCoverArtwork
+ @end
+@@ -12,8 +13,14 @@
+     if (!input) return nil;
+     CGRect extent = input.extent;
+     if (CGRectIsInfinite(extent) || extent.size.width < 1 || extent.size.height < 1) return nil;
++    CIFilter *colors = [CIFilter filterWithName:@"CIColorControls"];
++    [colors setValue:[input imageByClampingToExtent] forKey:kCIInputImageKey];
++    [colors setValue:@(1.18) forKey:kCIInputSaturationKey];
++    [colors setValue:@(1.06) forKey:kCIInputContrastKey];
++    CIImage *enhanced = [colors outputImage] ?: input;
++
+     CIFilter *blur = [CIFilter filterWithName:@"CIGaussianBlur"];
+-    [blur setValue:[input imageByClampingToExtent] forKey:kCIInputImageKey];
++    [blur setValue:[enhanced imageByClampingToExtent] forKey:kCIInputImageKey];
+     [blur setValue:@(MAX(extent.size.width, extent.size.height) / 14) forKey:kCIInputRadiusKey];
+     CIImage *output = [blur.outputImage imageByCroppingToRect:extent];
+     static CIContext *context;
+@@ -40,7 +47,7 @@
+ UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *current, NSString *next, CGSize size) {
+     if (size.width < 8 || size.height < 8 || size.width > 4096 || size.height > 4096) size = CGSizeMake(600, 600);
+     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+-    format.scale = 1;
++    format.scale = MAX(2.0, UIScreen.mainScreen.scale);
+     format.opaque = YES;
+     UIImage *back = cover ? blurred(cover, size) : nil;
+     return [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+@@ -53,8 +60,22 @@
+             CGSize drawn = CGSizeMake(picture.size.width * scale, picture.size.height * scale);
+             [picture drawInRect:CGRectMake((size.width - drawn.width) / 2, (size.height - drawn.height) / 2, drawn.width, drawn.height)];
+         }
+-        [[UIColor colorWithWhite:0 alpha:back ? 0.5 : 0.35] setFill];
++        [[UIColor colorWithWhite:0 alpha:back ? 0.38 : 0.25] setFill];
+         UIRectFill(all);
++
++        CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
++        NSArray *colors = @[
++            (id)[UIColor colorWithRed:0.25 green:0.18 blue:0.42 alpha:0.28].CGColor,
++            (id)[UIColor colorWithRed:0.58 green:0.28 blue:0.22 alpha:0.20].CGColor,
++            (id)[UIColor colorWithRed:0.18 green:0.34 blue:0.48 alpha:0.18].CGColor
++        ];
++        CGFloat locations[] = {0.0, 0.5, 1.0};
++        CGGradientRef gradient = CGGradientCreateWithColors(space, (__bridge CFArrayRef)colors, locations);
++        CGContextDrawLinearGradient(context.CGContext, gradient,
++                                     CGPointMake(0, 0), CGPointMake(size.width, size.height),
++                                     kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
++        CGGradientRelease(gradient);
++        CGColorSpaceRelease(space);
+ 
+         CGFloat margin = size.width * 0.09, width = size.width - margin * 2, gap = size.height * 0.035;
+         NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
+@@ -62,7 +83,7 @@
+         NSShadow *shadow = [NSShadow new];
+         shadow.shadowColor = [UIColor colorWithWhite:0 alpha:0.5];
+         shadow.shadowBlurRadius = size.width * 0.02;
+-        UIFont *main = fitted(current ?: @"", size.width * 0.115, width, 5, UIFontWeightHeavy);
++        UIFont *main = fitted(current ?: @"", size.width * (0.105 + MIN(0.045, MAX(0.0, (SGRLyricsStyleFontSize() - 20.0) / 24.0 * 0.045))), width, 5, SGRLyricsStyleFontWeight());
+         UIFont *small = [UIFont systemFontOfSize:MAX(10, main.pointSize * 0.55) weight:UIFontWeightSemibold];
+         // Heights first, so the line being sung sits at the middle however long the others are.
+         CGSize (^measure)(NSString *, UIFont *) = ^CGSize(NSString *text, UIFont *font) {
+--- a/tweak/Sources/Shared/Sing/SGSingDSP.m
++++ b/tweak/Sources/Shared/Sing/SGSingDSP.m
+@@ -117,9 +117,11 @@
+                 size_t rightAt = leftAt + 1;
+                 float left = isfinite(vocals[leftAt]) ? vocals[leftAt] : 0;
+                 float right = isfinite(vocals[rightAt]) ? vocals[rightAt] : 0;
++                // The separated vocal stem is often already narrow. Keep only its mid channel
++                // so Spatial Voice produces a deterministic front/center vocal instead of an
++                // almost inaudible 75% side reduction.
+                 float mid = 0.5f * (left + right);
+-                float side = 0.5f * (left - right);
+-                vocal = c == 0 ? mid + side * 0.25f : mid - side * 0.25f;
++                vocal = mid;
+             }
+ 
+             // instrumental = original - vocal

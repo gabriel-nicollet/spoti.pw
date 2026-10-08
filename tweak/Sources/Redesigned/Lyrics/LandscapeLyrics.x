@@ -48,12 +48,24 @@ static void pageChanged(BOOL onScreen) {
     if (!SGFlag(SGRKeyLyricsLandscape, NO) && onScreen) return;
     UIWindowScene *scene = activeScene();
     for (UIWindow *window in scene.windows) [window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
-    if (!onScreen && scene && UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) {
-        UIWindowSceneGeometryPreferencesIOS *upright =
-            [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait];
-        [scene requestGeometryUpdateWithPreferences:upright errorHandler:^(NSError *error) {
-            SGLog(@"landscape lyrics: could not turn back upright: %@", error.localizedDescription);
-        }];
+    if (!scene) return;
+
+    if (onScreen) {
+        if (@available(iOS 16.0, *)) {
+            UIWindowSceneGeometryPreferencesIOS *wide =
+                [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
+            [scene requestGeometryUpdateWithPreferences:wide errorHandler:^(NSError *error) {
+                SGLog(@"landscape lyrics: could not turn sideways: %@", error.localizedDescription);
+            }];
+        }
+    } else if (UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) {
+        if (@available(iOS 16.0, *)) {
+            UIWindowSceneGeometryPreferencesIOS *upright =
+                [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait];
+            [scene requestGeometryUpdateWithPreferences:upright errorHandler:^(NSError *error) {
+                SGLog(@"landscape lyrics: could not turn back upright: %@", error.localizedDescription);
+            }];
+        }
     }
 }
 

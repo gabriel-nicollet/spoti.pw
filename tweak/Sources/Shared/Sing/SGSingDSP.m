@@ -117,9 +117,11 @@ void SGSingMixerProcess(SGSingMixer *m,
                 size_t rightAt = leftAt + 1;
                 float left = isfinite(vocals[leftAt]) ? vocals[leftAt] : 0;
                 float right = isfinite(vocals[rightAt]) ? vocals[rightAt] : 0;
+                // The separated vocal stem is often already narrow. Keep only its mid channel
+                // so Spatial Voice produces a deterministic front/center vocal instead of an
+                // almost inaudible 75% side reduction.
                 float mid = 0.5f * (left + right);
-                float side = 0.5f * (left - right);
-                vocal = c == 0 ? mid + side * 0.25f : mid - side * 0.25f;
+                vocal = mid;
             }
 
             // instrumental = original - vocal

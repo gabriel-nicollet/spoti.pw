@@ -110,52 +110,134 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
 @interface SGRLyricsStylePreview : UIView
 @end
 
-@implementation SGRLyricsStylePreview
+@implementation SGRLyricsStylePreview {
+    CAGradientLayer *_gradient;
+    CADisplayLink *_link;
+    NSArray<NSString *> *_examples;
+    NSInteger _exampleIndex;
+    NSInteger _wordIndex;
+    CFTimeInterval _lastStep;
+}
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
-    self.backgroundColor = UIColor.blackColor;
+
+    _examples = @[
+        @"Paper boats on a river of light",
+        @"Carry the words we forgot to say",
+        @"And watch you sabotage",
+        @"We are still finding our way home"
+    ];
+    _exampleIndex = 0;
+    _wordIndex = 0;
+    self.backgroundColor = UIColor.clearColor;
     self.layer.cornerRadius = 24.0;
     self.clipsToBounds = YES;
+
+    _gradient = [CAGradientLayer layer];
+    _gradient.colors = @[
+        (id)[UIColor colorWithRed:0.19 green:0.22 blue:0.43 alpha:1].CGColor,
+        (id)[UIColor colorWithRed:0.38 green:0.25 blue:0.42 alpha:1].CGColor,
+        (id)[UIColor colorWithRed:0.52 green:0.35 blue:0.27 alpha:1].CGColor
+    ];
+    _gradient.startPoint = CGPointMake(0.05, 0.15);
+    _gradient.endPoint = CGPointMake(0.95, 0.85);
+    [self.layer insertSublayer:_gradient atIndex:0];
+
     [NSNotificationCenter.defaultCenter addObserver:self
                                              selector:@selector(styleDidChange:)
                                                  name:SGRLyricsTextDidChangeNotification
                                                object:nil];
+
+    _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+    _link.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
+    [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    _lastStep = CACurrentMediaTime();
     return self;
 }
 
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
+    [_link invalidate];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _gradient.frame = self.bounds;
 }
 
 - (void)styleDidChange:(NSNotification *)notification {
+    _exampleIndex = 0;
+    _wordIndex = 0;
+    _lastStep = CACurrentMediaTime();
+    [self setNeedsDisplay];
+}
+
+- (void)tick:(CADisplayLink *)link {
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - _lastStep < 0.34) return;
+    _lastStep = now;
+
+    NSArray<NSString *> *words = [_examples[_exampleIndex] componentsSeparatedByString:@" "];
+    _wordIndex++;
+    if (_wordIndex >= (NSInteger)words.count) {
+        _wordIndex = 0;
+        _exampleIndex = (_exampleIndex + 1) % (NSInteger)_examples.count;
+    }
     [self setNeedsDisplay];
 }
 
 - (void)drawRect:(CGRect)rect {
     CGFloat size = SGRLyricsStyleFontSize();
     CGFloat weight = SGRLyricsStyleFontWeight();
+    CGFloat dim = SGRLyricsStyleDim();
+    CGFloat bloom = SGRLyricsStyleBloom() / 100.0;
 
-    UIFont *current = [UIFont systemFontOfSize:size weight:weight];
-    UIFont *next = [UIFont systemFontOfSize:size * 0.67 weight:weight];
+    NSString *currentText = _examples[_exampleIndex];
+    NSArray<NSString *> *words = [currentText componentsSeparatedByString:@" "];
 
-    NSDictionary *currentAttributes = @{
-        NSFontAttributeName: current,
-        NSForegroundColorAttributeName: UIColor.whiteColor
-    };
+    UIFont *font = [UIFont systemFontOfSize:size weight:weight];
+    NSMutableAttributedString *current = [[NSMutableAttributedString alloc] initWithString:currentText];
+    NSRange range = NSMakeRange(0, current.length);
+    [current addAttribute:NSFontAttributeName value:font range:range];
+    [current addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:MAX(0.65, 1.0 - dim * 0.35)] range:range];
+
+    NSUInteger location = 0;
+    for (NSInteger i = 0; i < (NSInteger)words.count; i++) {
+        NSString *word = words[i];
+        NSRange wordRange = NSMakeRange(location, word.length);
+        if (i == _wordIndex) {
+            [current addAttribute:NSForegroundColorAttributeName
+                            value:UIColor.whiteColor
+                            range:wordRange];
+            if (bloom > 0) {
+                NSShadow *shadow = [NSShadow new];
+                shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.85, bloom)];
+                shadow.shadowBlurRadius = 8.0 + 12.0 * bloom;
+                shadow.shadowOffset = CGSizeZero;
+                [current addAttribute:NSShadowAttributeName value:shadow range:wordRange];
+            }
+        }
+        location += word.length + 1;
+    }
+
+    NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
+    paragraph.alignment = NSTextAlignmentLeft;
+    paragraph.lineBreakMode = NSLineBreakByWordWrapping;
+
+    CGRect currentRect = CGRectMake(24.0, 34.0, rect.size.width - 48.0, size * 2.8);
+    [current addAttribute:NSParagraphStyleAttributeName value:paragraph range:range];
+    [current drawInRect:currentRect];
+
+    NSString *nextText = _examples[(_exampleIndex + 1) % (NSInteger)_examples.count];
+    UIFont *nextFont = [UIFont systemFontOfSize:size * 0.62 weight:weight];
     NSDictionary *nextAttributes = @{
-        NSFontAttributeName: next,
-        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]
+        NSFontAttributeName: nextFont,
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:MAX(0.16, dim * 0.9)]
     };
-
-    NSString *currentText = @"This is your lyric";
-    NSString *nextText = @"A live preview of the style";
-
-    CGRect currentRect = CGRectMake(22.0, 48.0, rect.size.width - 44.0, size + 12.0);
-    CGRect nextRect = CGRectMake(22.0, 48.0 + size + 20.0, rect.size.width - 44.0, size * 0.67 + 12.0);
-
-    [currentText drawInRect:currentRect withAttributes:currentAttributes];
-    [nextText drawInRect:nextRect withAttributes:nextAttributes];
+    [nextText drawInRect:CGRectMake(24.0, CGRectGetMaxY(currentRect) - 10.0,
+                                    rect.size.width - 48.0, nextFont.lineHeight + 8.0)
+          withAttributes:nextAttributes];
 }
 
 @end
