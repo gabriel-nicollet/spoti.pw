@@ -1,4 +1,5 @@
 // Player redesign: the ⋯ opens the system's own menu, laid out the way the Music app lays out its own, in
+#import "Redesigned/Lyrics/Sing.h"
 // place of Spotify's sheet of rows -- while what is in it, and what each row does, stay Spotify's.
 //
 // The rows come from Swift item factories with no way in, and which there are depends on the track, where it
