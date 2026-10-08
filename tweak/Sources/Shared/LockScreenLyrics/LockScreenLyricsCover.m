@@ -3,7 +3,8 @@
 // drawn when the line changes (a few times a minute), not an animation: iOS gives a now playing artwork no per-word clock.
 #import <CoreImage/CoreImage.h>
 #import "LockScreenLyrics.h"
-#import "Redesigned/Lyrics/LyricsText.h"
+CGFloat SGRLyricsStyleFontSize(void);
+CGFloat SGRLyricsStyleFontWeight(void);
 
 @implementation SGLyricsCoverArtwork
 @end
