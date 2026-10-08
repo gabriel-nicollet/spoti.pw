@@ -105,13 +105,15 @@ SGModRow *SGRLyricsLandscapeRow(void) {
 
 #pragma mark - Lyrics style preview
 
-static const CGFloat kLyricsStylePreviewHeight = 180.0;
+static const CGFloat kLyricsStylePreviewHeight = 220.0;
 
 @interface SGRLyricsStylePreview : UIView
 @end
 
 @implementation SGRLyricsStylePreview {
     CAGradientLayer *_gradient;
+    UILabel *_currentLabel;
+    UILabel *_nextLabel;
     CADisplayLink *_link;
     NSArray<NSString *> *_examples;
     NSInteger _exampleIndex;
@@ -126,7 +128,8 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
         @"Paper boats on a river of light",
         @"Carry the words we forgot to say",
         @"And watch you sabotage",
-        @"We are still finding our way home"
+        @"We are still finding our way home",
+        @"Nothing lasts forever but this moment does"
     ];
     _exampleIndex = 0;
     _wordIndex = 0;
@@ -136,13 +139,27 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
 
     _gradient = [CAGradientLayer layer];
     _gradient.colors = @[
-        (id)[UIColor colorWithRed:0.19 green:0.22 blue:0.43 alpha:1].CGColor,
-        (id)[UIColor colorWithRed:0.38 green:0.25 blue:0.42 alpha:1].CGColor,
-        (id)[UIColor colorWithRed:0.52 green:0.35 blue:0.27 alpha:1].CGColor
+        (id)[UIColor colorWithRed:0.16 green:0.22 blue:0.42 alpha:1].CGColor,
+        (id)[UIColor colorWithRed:0.34 green:0.25 blue:0.43 alpha:1].CGColor,
+        (id)[UIColor colorWithRed:0.47 green:0.34 blue:0.30 alpha:1].CGColor
     ];
-    _gradient.startPoint = CGPointMake(0.05, 0.15);
-    _gradient.endPoint = CGPointMake(0.95, 0.85);
+    _gradient.startPoint = CGPointMake(0.05, 0.10);
+    _gradient.endPoint = CGPointMake(0.95, 0.90);
     [self.layer insertSublayer:_gradient atIndex:0];
+
+    _currentLabel = [UILabel new];
+    _currentLabel.numberOfLines = 0;
+    _currentLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    _currentLabel.textAlignment = NSTextAlignmentLeft;
+    _currentLabel.layer.masksToBounds = NO;
+    [self addSubview:_currentLabel];
+
+    _nextLabel = [UILabel new];
+    _nextLabel.numberOfLines = 0;
+    _nextLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    _nextLabel.textAlignment = NSTextAlignmentLeft;
+    _nextLabel.layer.masksToBounds = NO;
+    [self addSubview:_nextLabel];
 
     [NSNotificationCenter.defaultCenter addObserver:self
                                              selector:@selector(styleDidChange:)
@@ -153,6 +170,7 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
     _link.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
     [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     _lastStep = CACurrentMediaTime();
+    [self refreshPreview];
     return self;
 }
 
@@ -164,13 +182,16 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
 - (void)layoutSubviews {
     [super layoutSubviews];
     _gradient.frame = self.bounds;
+    CGFloat inset = 22.0;
+    CGFloat width = MAX(1.0, self.bounds.size.width - inset * 2.0);
+    CGFloat size = SGRLyricsStyleFontSize();
+    _currentLabel.frame = CGRectMake(inset, 28.0, width, size * 3.0 + SGRLyricsStyleLineGap() * 2.0);
+    _nextLabel.frame = CGRectMake(inset, self.bounds.size.height - 48.0, width, 28.0);
 }
 
 - (void)styleDidChange:(NSNotification *)notification {
-    _exampleIndex = 0;
-    _wordIndex = 0;
-    _lastStep = CACurrentMediaTime();
-    [self setNeedsDisplay];
+    [self setNeedsLayout];
+    [self refreshPreview];
 }
 
 - (void)tick:(CADisplayLink *)link {
@@ -184,36 +205,45 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
         _wordIndex = 0;
         _exampleIndex = (_exampleIndex + 1) % (NSInteger)_examples.count;
     }
-    [self setNeedsDisplay];
+    [self refreshPreview];
 }
 
-- (void)drawRect:(CGRect)rect {
+- (void)refreshPreview {
+    if (!_currentLabel || !_nextLabel) return;
+
     CGFloat size = SGRLyricsStyleFontSize();
     CGFloat weight = SGRLyricsStyleFontWeight();
     CGFloat dim = SGRLyricsStyleDim();
+    CGFloat blur = SGRLyricsStyleBlur();
     CGFloat bloom = SGRLyricsStyleBloom() / 100.0;
+    CGFloat lineGap = SGRLyricsStyleLineGap();
 
-    NSString *currentText = _examples[_exampleIndex];
-    NSArray<NSString *> *words = [currentText componentsSeparatedByString:@" "];
-
+    NSString *text = _examples[_exampleIndex];
+    NSArray<NSString *> *words = [text componentsSeparatedByString:@" "];
     UIFont *font = [UIFont systemFontOfSize:size weight:weight];
-    NSMutableAttributedString *current = [[NSMutableAttributedString alloc] initWithString:currentText];
-    NSRange range = NSMakeRange(0, current.length);
-    [current addAttribute:NSFontAttributeName value:font range:range];
-    [current addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:MAX(0.65, 1.0 - dim * 0.35)] range:range];
+    NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
+    paragraph.alignment = NSTextAlignmentLeft;
+    paragraph.lineBreakMode = NSLineBreakByWordWrapping;
+    paragraph.lineSpacing = MAX(0, lineGap - font.lineHeight * 0.15);
+
+    NSMutableAttributedString *current = [[NSMutableAttributedString alloc] initWithString:text];
+    NSRange all = NSMakeRange(0, current.length);
+    [current addAttribute:NSFontAttributeName value:font range:all];
+    [current addAttribute:NSForegroundColorAttributeName
+                    value:[UIColor colorWithWhite:1 alpha:MAX(0.18, 1.0 - dim)]
+                    range:all];
+    [current addAttribute:NSParagraphStyleAttributeName value:paragraph range:all];
 
     NSUInteger location = 0;
     for (NSInteger i = 0; i < (NSInteger)words.count; i++) {
         NSString *word = words[i];
         NSRange wordRange = NSMakeRange(location, word.length);
         if (i == _wordIndex) {
-            [current addAttribute:NSForegroundColorAttributeName
-                            value:UIColor.whiteColor
-                            range:wordRange];
+            [current addAttribute:NSForegroundColorAttributeName value:UIColor.whiteColor range:wordRange];
             if (bloom > 0) {
                 NSShadow *shadow = [NSShadow new];
-                shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.85, bloom)];
-                shadow.shadowBlurRadius = 8.0 + 12.0 * bloom;
+                shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.9, bloom)];
+                shadow.shadowBlurRadius = 5.0 + 16.0 * bloom;
                 shadow.shadowOffset = CGSizeZero;
                 [current addAttribute:NSShadowAttributeName value:shadow range:wordRange];
             }
@@ -221,23 +251,22 @@ static const CGFloat kLyricsStylePreviewHeight = 180.0;
         location += word.length + 1;
     }
 
-    NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
-    paragraph.alignment = NSTextAlignmentLeft;
-    paragraph.lineBreakMode = NSLineBreakByWordWrapping;
-
-    CGRect currentRect = CGRectMake(24.0, 34.0, rect.size.width - 48.0, size * 2.8);
-    [current addAttribute:NSParagraphStyleAttributeName value:paragraph range:range];
-    [current drawInRect:currentRect];
+    _currentLabel.attributedText = current;
 
     NSString *nextText = _examples[(_exampleIndex + 1) % (NSInteger)_examples.count];
-    UIFont *nextFont = [UIFont systemFontOfSize:size * 0.62 weight:weight];
-    NSDictionary *nextAttributes = @{
+    UIFont *nextFont = [UIFont systemFontOfSize:MAX(14.0, size * 0.58) weight:weight];
+    _nextLabel.attributedText = [[NSAttributedString alloc] initWithString:nextText attributes:@{
         NSFontAttributeName: nextFont,
-        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:MAX(0.16, dim * 0.9)]
-    };
-    [nextText drawInRect:CGRectMake(24.0, CGRectGetMaxY(currentRect) - 10.0,
-                                    rect.size.width - 48.0, nextFont.lineHeight + 8.0)
-          withAttributes:nextAttributes];
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:MAX(0.12, dim * 0.75)]
+    }];
+    _nextLabel.layer.filters = blur > 0 ? @[[self blurFilterWithRadius:blur]] : nil;
+    [self setNeedsLayout];
+}
+
+- (id)blurFilterWithRadius:(CGFloat)radius {
+    CIFilter *filter = [CIFilter filterWithName:@"CIGaussianBlur"];
+    [filter setValue:@(radius) forKey:kCIInputRadiusKey];
+    return filter;
 }
 
 @end
