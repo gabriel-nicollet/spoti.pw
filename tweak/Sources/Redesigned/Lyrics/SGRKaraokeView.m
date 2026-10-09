@@ -800,7 +800,11 @@ static const NSUInteger kLinesPerFrame = 4;
 }
 
 - (CGRect)bubbleTarget {
-    return _bubble ? CGRectInset(_bubble.frame, -kBubbleReach, -kBubbleReach) : CGRectNull;
+    // Artist-verified meanings get a bubble; community/editor meanings are dotted-underlined, so
+    // make the annotated line itself the tap target for those.
+    if (_bubble) return CGRectInset(_bubble.frame, -kBubbleReach, -kBubbleReach);
+    if (_underline) return CGRectInset(self.bounds, -kBubbleReach, -kBubbleReach);
+    return CGRectNull;
 }
 
 - (void)markMeaning:(NSArray<SGLyricsMeaning *> *)meanings {
@@ -1040,6 +1044,7 @@ typedef struct {
 } SGRKaraokeBreak;
 
 @interface SGRKaraokeView () <UIScrollViewDelegate>
+- (void)translateLine:(SGRKaraokeLineView *)view;
 @end
 
 @implementation SGRKaraokeView {
@@ -1129,7 +1134,12 @@ typedef struct {
     _asksCredit = _crediting || SGLyricsActive();
     _sweepsEstimates = SGFlag(SGKeyLyricsSimulateWords, NO);
     [self addSubview:_credit];
-    [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)]];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)];
+    UITapGestureRecognizer *doubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(doubleTapped:)];
+    doubleTap.numberOfTapsRequired = 2;
+    [tap requireGestureRecognizerToFail:doubleTap];
+    [self addGestureRecognizer:tap];
+    [self addGestureRecognizer:doubleTap];
     [self addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(held:)]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerTransitionChanged:) name:SGPlayerTransitionNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerTransitionChanged:) name:SGPlayerTransitionEndedNotification object:nil];
@@ -1161,14 +1171,69 @@ typedef struct {
         [self explainLine:view];
         return;
     }
-    if (_plain) return;   // a line with no time has nowhere to seek to
     for (SGRKaraokeLineView *view in _shown.allValues) {
         if (!CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), point)) continue;
+        [self translateLine:view];
+        return;
+    }
+}
+
+// Double-tapping keeps seeking available while a single tap is reserved for the requested translation.
+- (void)doubleTapped:(UITapGestureRecognizer *)tap {
+    if (self.takesTap && !self.takesTap()) return;
+    if (_extras && !_extras.hidden && CGRectContainsPoint(_extras.frame, [tap locationInView:self])) return;
+    CGPoint point = [tap locationInView:_scroll];
+    for (SGRKaraokeLineView *view in _shown.allValues) {
+        if (CGRectContainsPoint(view.bubbleTarget, [_scroll convertPoint:point toView:view])) return;
+        if (!CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), point)) continue;
+        if (_plain) return;
         SGKaraokeSeek(view.line.start);
         SGPlayFeedback(SGFeedbackSkip);
         [self followSong];
         return;
     }
+}
+
+- (void)translateLine:(SGRKaraokeLineView *)view {
+    NSString *original = SGKaraokeLineText(view.line) ?: @"";
+    NSString *translation = view.line.machineTranslation.length ? view.line.machineTranslation : view.line.translation;
+    UIViewController *top = SGTopController();
+    if (!top || !original.length) return;
+    if (translation.length) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:original message:translation preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleDefault handler:nil]];
+        [top presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    Class translator = NSClassFromString(@"SGRLyricsTranslator");
+    SEL availableSelector = NSSelectorFromString(@"isAvailable");
+    SEL translateSelector = NSSelectorFromString(@"translateLines:targetLanguage:completion:");
+    BOOL available = translator && [translator respondsToSelector:availableSelector]
+        && ((BOOL (*)(id, SEL))objc_msgSend)(translator, availableSelector)
+        && [translator respondsToSelector:translateSelector];
+    if (!available) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:original
+            message:@"No translation is supplied for this line, and on-device translation is unavailable on this device."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [top presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:original message:@"Translating on device…" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:nil]];
+    [top presentViewController:alert animated:YES completion:nil];
+    NSString *languageCode = NSLocale.preferredLanguages.firstObject ?: @"en";
+    NSString *languageName = [[NSLocale currentLocale] displayNameForKey:NSLocaleIdentifier value:languageCode] ?: languageCode;
+    __weak SGRKaraokeLineView *weakView = view;
+    typedef void (*SGTranslateIMP)(id, SEL, NSArray *, NSString *, void (^)(NSArray *, NSError *));
+    ((SGTranslateIMP)objc_msgSend)(translator, translateSelector, @[original], languageName, ^(NSArray *translated, NSError *error) {
+        NSString *result = !error && translated.count && [translated[0] isKindOfClass:NSString.class]
+            ? [translated[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : nil;
+        if (result.length) weakView.line.machineTranslation = result;
+        alert.message = result.length ? result : (error.localizedDescription ?: @"Translation could not be generated. Try again later.");
+    });
 }
 
 - (void)held:(UILongPressGestureRecognizer *)hold {

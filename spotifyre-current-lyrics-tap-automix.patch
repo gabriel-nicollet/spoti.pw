@@ -1,0 +1,170 @@
+diff --git a/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m b/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
+index f2de3c7..3c84c5e 100644
+--- a/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
++++ b/tweak/Sources/Redesigned/Lyrics/SGRKaraokeView.m
+@@ -800,7 +800,11 @@ static const NSUInteger kLinesPerFrame = 4;
+ }
+ 
+ - (CGRect)bubbleTarget {
+-    return _bubble ? CGRectInset(_bubble.frame, -kBubbleReach, -kBubbleReach) : CGRectNull;
++    // Artist-verified meanings get a bubble; community/editor meanings are dotted-underlined, so
++    // make the annotated line itself the tap target for those.
++    if (_bubble) return CGRectInset(_bubble.frame, -kBubbleReach, -kBubbleReach);
++    if (_underline) return CGRectInset(self.bounds, -kBubbleReach, -kBubbleReach);
++    return CGRectNull;
+ }
+ 
+ - (void)markMeaning:(NSArray<SGLyricsMeaning *> *)meanings {
+@@ -1040,6 +1044,7 @@ typedef struct {
+ } SGRKaraokeBreak;
+ 
+ @interface SGRKaraokeView () <UIScrollViewDelegate>
++- (void)translateLine:(SGRKaraokeLineView *)view;
+ @end
+ 
+ @implementation SGRKaraokeView {
+@@ -1129,7 +1134,12 @@ typedef struct {
+     _asksCredit = _crediting || SGLyricsActive();
+     _sweepsEstimates = SGFlag(SGKeyLyricsSimulateWords, NO);
+     [self addSubview:_credit];
+-    [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)]];
++    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)];
++    UITapGestureRecognizer *doubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(doubleTapped:)];
++    doubleTap.numberOfTapsRequired = 2;
++    [tap requireGestureRecognizerToFail:doubleTap];
++    [self addGestureRecognizer:tap];
++    [self addGestureRecognizer:doubleTap];
+     [self addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(held:)]];
+     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerTransitionChanged:) name:SGPlayerTransitionNotification object:nil];
+     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerTransitionChanged:) name:SGPlayerTransitionEndedNotification object:nil];
+@@ -1161,9 +1171,22 @@ typedef struct {
+         [self explainLine:view];
+         return;
+     }
+-    if (_plain) return;   // a line with no time has nowhere to seek to
+     for (SGRKaraokeLineView *view in _shown.allValues) {
+         if (!CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), point)) continue;
++        [self translateLine:view];
++        return;
++    }
++}
++
++// Double-tapping keeps seeking available while a single tap is reserved for the requested translation.
++- (void)doubleTapped:(UITapGestureRecognizer *)tap {
++    if (self.takesTap && !self.takesTap()) return;
++    if (_extras && !_extras.hidden && CGRectContainsPoint(_extras.frame, [tap locationInView:self])) return;
++    CGPoint point = [tap locationInView:_scroll];
++    for (SGRKaraokeLineView *view in _shown.allValues) {
++        if (CGRectContainsPoint(view.bubbleTarget, [_scroll convertPoint:point toView:view])) return;
++        if (!CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), point)) continue;
++        if (_plain) return;
+         SGKaraokeSeek(view.line.start);
+         SGPlayFeedback(SGFeedbackSkip);
+         [self followSong];
+@@ -1171,6 +1194,48 @@ typedef struct {
+     }
+ }
+ 
++- (void)translateLine:(SGRKaraokeLineView *)view {
++    NSString *original = SGKaraokeLineText(view.line) ?: @"";
++    NSString *translation = view.line.machineTranslation.length ? view.line.machineTranslation : view.line.translation;
++    UIViewController *top = SGTopController();
++    if (!top || !original.length) return;
++    if (translation.length) {
++        UIAlertController *alert = [UIAlertController alertControllerWithTitle:original message:translation preferredStyle:UIAlertControllerStyleAlert];
++        [alert addAction:[UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleDefault handler:nil]];
++        [top presentViewController:alert animated:YES completion:nil];
++        return;
++    }
++
++    Class translator = NSClassFromString(@"SGRLyricsTranslator");
++    SEL availableSelector = NSSelectorFromString(@"isAvailable");
++    SEL translateSelector = NSSelectorFromString(@"translateLines:targetLanguage:completion:");
++    BOOL available = translator && [translator respondsToSelector:availableSelector]
++        && ((BOOL (*)(id, SEL))objc_msgSend)(translator, availableSelector)
++        && [translator respondsToSelector:translateSelector];
++    if (!available) {
++        UIAlertController *alert = [UIAlertController alertControllerWithTitle:original
++            message:@"No translation is supplied for this line, and on-device translation is unavailable on this device."
++            preferredStyle:UIAlertControllerStyleAlert];
++        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
++        [top presentViewController:alert animated:YES completion:nil];
++        return;
++    }
++
++    UIAlertController *alert = [UIAlertController alertControllerWithTitle:original message:@"Translating on device…" preferredStyle:UIAlertControllerStyleAlert];
++    [alert addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:nil]];
++    [top presentViewController:alert animated:YES completion:nil];
++    NSString *languageCode = NSLocale.preferredLanguages.firstObject ?: @"en";
++    NSString *languageName = [[NSLocale currentLocale] displayNameForKey:NSLocaleIdentifier value:languageCode] ?: languageCode;
++    __weak SGRKaraokeLineView *weakView = view;
++    typedef void (*SGTranslateIMP)(id, SEL, NSArray *, NSString *, void (^)(NSArray *, NSError *));
++    ((SGTranslateIMP)objc_msgSend)(translator, translateSelector, @[original], languageName, ^(NSArray *translated, NSError *error) {
++        NSString *result = !error && translated.count && [translated[0] isKindOfClass:NSString.class]
++            ? [translated[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : nil;
++        if (result.length) weakView.line.machineTranslation = result;
++        alert.message = result.length ? result : (error.localizedDescription ?: @"Translation could not be generated. Try again later.");
++    });
++}
++
+ - (void)held:(UILongPressGestureRecognizer *)hold {
+     if (hold.state != UIGestureRecognizerStateBegan || !_meanings.count) return;
+     CGPoint point = [hold locationInView:_scroll];
+diff --git a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
+index 37ecf8f..8ac960f 100644
+--- a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
++++ b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
+@@ -24,6 +24,7 @@ static NSDictionary *sg_spotifyInfo;
+ static CFAbsoluteTime sg_spotifyInfoAt;
+ static NSString *sg_shownLine;
+ static BOOL sg_resending;
++static id sg_defaultsObserver;
+ // What the cover was last drawn for: the track and the line's index, or nil with no line.
+ static NSString *sg_shownCover;
+ static NSTimer *sg_timer;
+@@ -179,6 +180,17 @@ static BOOL playingBy(NSDictionary *info) {
+         sg_spotifyInfo = info;
+         sg_spotifyInfoAt = now;
+     }
++    // When both features are off, pass Spotify's dictionary through byte-for-byte. Besides avoiding
++    // needless work, this keeps the tweak from rewriting elapsed time during native AutoMix changes.
++    if (!SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO)) {
++        dispatch_async(dispatch_get_main_queue(), ^{
++            sg_shownLine = nil;
++            sg_shownCover = nil;
++            setTicking(NO);
++        });
++        %orig;
++        return;
++    }
+     BOOL playing = playingBy(info) && info[MPNowPlayingInfoPropertyElapsedPlaybackTime] != nil;
+     // Karaoke's lyrics are main-thread state; off it the info goes out as it is and the next tick adds the line.
+     if (!NSThread.isMainThread || !info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) {
+@@ -210,9 +222,24 @@ static BOOL playingBy(NSDictionary *info) {
+ %end
+ 
+ %ctor {
+-    if (!SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO)) return;
+     sg_lock = [NSObject new];
+     %init;
+-    // The timer waits for Spotify to report a playing track; nothing before that has a line to show.
+-    SGLog(@"lock screen lyrics: on, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
++    // Always install the lightweight passthrough hook so the switches work without restarting Spotify.
++    // When both are off, setNowPlayingInfo: forwards Spotify's original dictionary untouched.
++    sg_defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
++        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
++            BOOL enabled = SGFlag(SGKeyLockScreenLyrics, NO) || SGFlag(SGKeyLockScreenLyricsCover, NO);
++            if (!enabled) {
++                setTicking(NO);
++                sg_shownLine = nil;
++                sg_shownCover = nil;
++                return;
++            }
++            NSDictionary *info;
++            @synchronized (sg_lock) { info = sg_spotifyInfo; }
++            BOOL playing = info[MPNowPlayingInfoPropertyElapsedPlaybackTime] && playingBy(info);
++            setTicking(playing);
++            if (playing) tick();
++        }];
++    SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
+ }

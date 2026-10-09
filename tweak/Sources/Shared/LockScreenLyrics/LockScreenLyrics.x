@@ -24,6 +24,7 @@ static NSDictionary *sg_spotifyInfo;
 static CFAbsoluteTime sg_spotifyInfoAt;
 static NSString *sg_shownLine;
 static BOOL sg_resending;
+static id sg_defaultsObserver;
 // What the cover was last drawn for: the track and the line's index, or nil with no line.
 static NSString *sg_shownCover;
 static NSTimer *sg_timer;
@@ -179,6 +180,17 @@ static BOOL playingBy(NSDictionary *info) {
         sg_spotifyInfo = info;
         sg_spotifyInfoAt = now;
     }
+    // When both features are off, pass Spotify's dictionary through byte-for-byte. Besides avoiding
+    // needless work, this keeps the tweak from rewriting elapsed time during native AutoMix changes.
+    if (!SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            sg_shownLine = nil;
+            sg_shownCover = nil;
+            setTicking(NO);
+        });
+        %orig;
+        return;
+    }
     BOOL playing = playingBy(info) && info[MPNowPlayingInfoPropertyElapsedPlaybackTime] != nil;
     // Karaoke's lyrics are main-thread state; off it the info goes out as it is and the next tick adds the line.
     if (!NSThread.isMainThread || !info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) {
@@ -210,9 +222,24 @@ static BOOL playingBy(NSDictionary *info) {
 %end
 
 %ctor {
-    if (!SGFlag(SGKeyLockScreenLyrics, NO) && !SGFlag(SGKeyLockScreenLyricsCover, NO)) return;
     sg_lock = [NSObject new];
     %init;
-    // The timer waits for Spotify to report a playing track; nothing before that has a line to show.
-    SGLog(@"lock screen lyrics: on, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
+    // Always install the lightweight passthrough hook so the switches work without restarting Spotify.
+    // When both are off, setNowPlayingInfo: forwards Spotify's original dictionary untouched.
+    sg_defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            BOOL enabled = SGFlag(SGKeyLockScreenLyrics, NO) || SGFlag(SGKeyLockScreenLyricsCover, NO);
+            if (!enabled) {
+                setTicking(NO);
+                sg_shownLine = nil;
+                sg_shownCover = nil;
+                return;
+            }
+            NSDictionary *info;
+            @synchronized (sg_lock) { info = sg_spotifyInfo; }
+            BOOL playing = info[MPNowPlayingInfoPropertyElapsedPlaybackTime] && playingBy(info);
+            setTicking(playing);
+            if (playing) tick();
+        }];
+    SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
 }
