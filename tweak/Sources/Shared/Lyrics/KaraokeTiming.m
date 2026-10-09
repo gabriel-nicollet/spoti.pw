@@ -20,6 +20,12 @@ static const NSUInteger kSyllableLetters = 3;
 
 #pragma mark - the model
 
+NSString *SGKaraokeLineDisplayTranslation(SGKaraokeLine *line) {
+    if ([NSUserDefaults.standardUserDefaults boolForKey:SGKeyLyricsAITranslation] && line.machineTranslation.length)
+        return line.machineTranslation;
+    return line.translation;
+}
+
 NSString *SGKaraokeLineText(SGKaraokeLine *line) {
     NSMutableString *text = [NSMutableString string];
     for (SGKaraokeWord *word in line.words) {

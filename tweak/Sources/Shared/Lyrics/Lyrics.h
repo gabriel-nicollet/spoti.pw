@@ -23,6 +23,8 @@ SGModRow *SGLyricsWordTimingRow(void);
 // the source had timed them. Off, such a line lights up whole as it starts. Off by default: the
 // estimate is a guess dressed up as timing.
 #define SGKeyLyricsSimulateWords @"spotifyglass.lyricsSimulateWords"
+// On-device Apple Intelligence translation, shown beneath the original lyrics when enabled.
+#define SGKeyLyricsAITranslation @"spotifyglass.lyricsAITranslation"
 
 // How finely a line was timed by where it came from. The words of a line timed by the line are still
 // there, each with an estimated time, for a page that wants to sweep them anyway; a line with no time
@@ -67,10 +69,14 @@ typedef NS_ENUM(NSUInteger, SGKaraokeAlign) {
 @property (nonatomic, strong) SGKaraokeLine *pronunciation;
 // The line in another language, the backing's words with it; nil where the source has none.
 @property (nonatomic, copy) NSString *translation;
+// Cached on-device translation, separate from translations supplied by the lyrics source.
+@property (nonatomic, copy) NSString *machineTranslation;
 @end
 
 // The line as one string, a space between the words that are not joined.
 NSString *SGKaraokeLineText(SGKaraokeLine *line);
+// AI translation when enabled and available, otherwise the source-provided translation.
+NSString *SGKaraokeLineDisplayTranslation(SGKaraokeLine *line);
 // When the singing of a line is over: its own end, or its backing's when that runs on past it.
 NSInteger SGKaraokeSungEnd(SGKaraokeLine *line);
 // The one line a place with room for one names as the one being sung at `ms`. Two voices can sing
