@@ -114,7 +114,9 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
 @implementation SGRLyricsStylePreview {
     CAGradientLayer *_gradient;
     UILabel *_currentLabel;
+    UILabel *_litLabel;
     UILabel *_nextLabel;
+    CAGradientLayer *_waveMask;
     CADisplayLink *_link;
     NSArray<NSString *> *_examples;
     NSInteger _exampleIndex;
@@ -156,6 +158,22 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     _currentLabel.layer.masksToBounds = NO;
     [self addSubview:_currentLabel];
 
+    // A second copy of the lyric is revealed by a soft mask whose edge travels continuously
+    // across the line, matching the karaoke renderer rather than swapping one word at a time.
+    _litLabel = [UILabel new];
+    _litLabel.numberOfLines = 0;
+    _litLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    _litLabel.textAlignment = NSTextAlignmentLeft;
+    _litLabel.layer.masksToBounds = NO;
+    _waveMask = [CAGradientLayer layer];
+    _waveMask.startPoint = CGPointMake(0, 0.5);
+    _waveMask.endPoint = CGPointMake(1, 0.5);
+    _waveMask.colors = @[(id)UIColor.whiteColor.CGColor, (id)UIColor.whiteColor.CGColor,
+                         (id)UIColor.clearColor.CGColor, (id)UIColor.clearColor.CGColor];
+    _waveMask.locations = @[@0, @0, @0.04, @1];
+    _litLabel.layer.mask = _waveMask;
+    [self addSubview:_litLabel];
+
     _nextLabel = [UILabel new];
     _nextLabel.numberOfLines = 0;
     _nextLabel.lineBreakMode = NSLineBreakByWordWrapping;
@@ -191,6 +209,8 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     CGFloat currentHeight = MIN(MAX(size * 1.15, fitting.height), self.bounds.size.height * 0.64);
     CGFloat currentY = 26.0;
     _currentLabel.frame = CGRectMake(inset, currentY, width, currentHeight);
+    _litLabel.frame = _currentLabel.frame;
+    _waveMask.frame = _litLabel.bounds;
     // Line spacing is the gap between the active and upcoming lyric rows, not paragraph spacing.
     CGFloat nextY = CGRectGetMaxY(_currentLabel.frame) + SGRLyricsStyleLineGap();
     CGFloat nextHeight = 32.0;
@@ -255,24 +275,29 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
                     value:[UIColor colorWithWhite:1 alpha:MAX(0.18, 1.0 - dim)]
                     range:all];
     [current addAttribute:NSParagraphStyleAttributeName value:paragraph range:all];
-
-    NSUInteger location = 0;
-    for (NSInteger i = 0; i < (NSInteger)words.count; i++) {
-        NSString *word = words[i];
-        NSRange wordRange = NSMakeRange(location, word.length);
-        CGFloat alpha = i < _wordIndex ? 1.0 : (i == _wordIndex ? MAX(0.18, (1.0 - dim) + (1.0 - MAX(0.18, 1.0 - dim)) * _wordProgress) : MAX(0.18, 1.0 - dim));
-        [current addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:alpha] range:wordRange];
-        if (i == _wordIndex && bloom > 0) {
-            NSShadow *shadow = [NSShadow new];
-            shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.9, bloom)];
-            shadow.shadowBlurRadius = 5.0 + 16.0 * bloom;
-            shadow.shadowOffset = CGSizeZero;
-            [current addAttribute:NSShadowAttributeName value:shadow range:wordRange];
-        }
-        location += word.length + 1;
-    }
-
     _currentLabel.attributedText = current;
+
+    NSMutableAttributedString *lit = [[NSMutableAttributedString alloc] initWithString:text];
+    [lit addAttribute:NSFontAttributeName value:font range:all];
+    [lit addAttribute:NSForegroundColorAttributeName value:UIColor.whiteColor range:all];
+    [lit addAttribute:NSParagraphStyleAttributeName value:paragraph range:all];
+    if (bloom > 0) {
+        NSShadow *shadow = [NSShadow new];
+        shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.9, bloom)];
+        shadow.shadowBlurRadius = 5.0 + 16.0 * bloom;
+        shadow.shadowOffset = CGSizeZero;
+        [lit addAttribute:NSShadowAttributeName value:shadow range:all];
+    }
+    _litLabel.attributedText = lit;
+
+    CGFloat progress = ((CGFloat)_wordIndex + _wordProgress) / (CGFloat)MAX(words.count, 1);
+    progress = MIN(1.0, MAX(0.0, progress));
+    CGFloat feather = 0.035;
+    CGFloat edgeStart = MAX(0.0, progress - feather);
+    CGFloat edgeEnd = MIN(1.0, progress + feather);
+    _waveMask.frame = _litLabel.bounds;
+    _waveMask.locations = @[@0, @(edgeStart), @(edgeEnd), @1];
+
     NSString *nextText = _examples[(_exampleIndex + 1) % (NSInteger)_examples.count];
     UIFont *nextFont = [UIFont systemFontOfSize:MAX(14.0, size * 0.58) weight:weight];
     _nextLabel.attributedText = [[NSAttributedString alloc] initWithString:nextText attributes:@{

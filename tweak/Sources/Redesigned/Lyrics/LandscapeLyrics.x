@@ -29,9 +29,37 @@ static UIInterfaceOrientationMask plistMask(void) {
 }
 
 static UIInterfaceOrientationMask (*sg_originalDelegate)(id, SEL, UIApplication *, UIWindow *);
+static Class sg_hookedDelegateClass;
+
 static UIInterfaceOrientationMask delegateMask(id self, SEL _cmd, UIApplication *application, UIWindow *window) {
     if (landscapeNow()) return UIInterfaceOrientationMaskAllButUpsideDown;
     return sg_originalDelegate ? sg_originalDelegate(self, _cmd, application, window) : plistMask();
+}
+
+// Spotify's delegate class name changes between app builds. Hook the live delegate instance instead
+// of depending on one private, version-specific class name. If the method is inherited, add an
+// override to the concrete class so we don't accidentally replace a superclass implementation.
+static void installDelegateOrientationHook(void) {
+    id delegate = UIApplication.sharedApplication.delegate;
+    Class cls = delegate ? object_getClass(delegate) : Nil;
+    if (!cls || cls == sg_hookedDelegateClass) return;
+
+    SEL selector = @selector(application:supportedInterfaceOrientationsForWindow:);
+    Method method = class_getInstanceMethod(cls, selector);
+    IMP original = method ? method_getImplementation(method) : NULL;
+    if (original == (IMP)delegateMask) {
+        sg_hookedDelegateClass = cls;
+        return;
+    }
+
+    sg_originalDelegate = (UIInterfaceOrientationMask (*)(id, SEL, UIApplication *, UIWindow *))original;
+    const char *types = method ? method_getTypeEncoding(method) : "Q@:@@";
+    if (!class_addMethod(cls, selector, (IMP)delegateMask, types)) {
+        Method own = class_getInstanceMethod(cls, selector);
+        if (own) method_setImplementation(own, (IMP)delegateMask);
+    }
+    sg_hookedDelegateClass = cls;
+    SGLog(@"landscape lyrics: orientation delegate hooked on %@", NSStringFromClass(cls));
 }
 
 static UIWindowScene *activeScene(void) {
@@ -80,6 +108,7 @@ static void deviceOrientationChanged(NSNotification *note) {
 // The page came or went: refresh the whole controller chain and follow the device while it is visible.
 static void pageChanged(BOOL onScreen) {
     sg_pageOnScreen = onScreen;
+    installDelegateOrientationHook();
     UIWindowScene *scene = activeScene();
     for (UIWindow *window in scene.windows) invalidateOrientation(window.rootViewController);
     if (!scene) return;
@@ -132,15 +161,5 @@ static BOOL containsLyricsFullscreenView(UIView *view) {
     [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
     [NSNotificationCenter.defaultCenter addObserverForName:UIDeviceOrientationDidChangeNotification
         object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) { deviceOrientationChanged(note); }];
-    Class delegate = NSClassFromString(@"_TtC24MusicApp_ContainerWiring18SpotifyAppDelegate");
-    SEL selector = @selector(application:supportedInterfaceOrientationsForWindow:);
-    if (!delegate) return;
-    Method existing = class_getInstanceMethod(delegate, selector);
-    if (existing) {
-        sg_originalDelegate = (UIInterfaceOrientationMask (*)(id, SEL, UIApplication *, UIWindow *))method_getImplementation(existing);
-        method_setImplementation(existing, (IMP)delegateMask);
-    } else {
-        class_addMethod(delegate, selector, (IMP)delegateMask, "Q@:@@");
-    }
-    SGLog(@"landscape lyrics: delegate %@", existing ? @"wrapped" : @"answers now");
+    dispatch_async(dispatch_get_main_queue(), ^{ installDelegateOrientationHook(); });
 }

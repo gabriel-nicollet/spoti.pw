@@ -254,7 +254,19 @@ static SGArtworkWatcher *sg_watcher;
         artwork = sg_artwork;
         key = sg_key;
     }
-    %orig(SGArtworkInInfo(info, artwork, key));
+    // Lyrics-on-cover is itself a still artwork. If the animated-artwork key is also present,
+    // iOS prefers the Canvas and the lyrics card disappears. Keep the lyrics card as the sole
+    // artwork while that feature is enabled; the animated key is restored on the next update
+    // as soon as the user turns lyrics-on-cover off.
+    if (SGFlag(SGKeyLockScreenLyricsCover, NO)) {
+        NSMutableDictionary *withoutAnimatedArtwork = [info mutableCopy] ?: [NSMutableDictionary dictionary];
+        for (NSString *animatedKey in (SGAnimatedArtworkKeys() ?: @[])) {
+            [withoutAnimatedArtwork removeObjectForKey:animatedKey];
+        }
+        %orig(withoutAnimatedArtwork);
+    } else {
+        %orig(SGArtworkInInfo(info, artwork, key));
+    }
 }
 %end
 
