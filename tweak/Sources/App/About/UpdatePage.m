@@ -320,6 +320,5 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 
 UIViewController *SGUpdatePage(void) {
     // Opening the page counts as asking, but the six hours still hold: Check now is the way past them.
-    SGCheckForUpdate(NO);
     return [SGUpdatePageController new];
 }

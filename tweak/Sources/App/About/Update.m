@@ -4,13 +4,12 @@
 // commit, each ending in a link to it. One request brings the last twenty releases rather than only
 // the newest, which is what lets the Updates page show every version between this build and the
 // newest one. Asked a few seconds after Spotify comes up (UpdateNotice.m) and when Mod Settings
-// opens, at most once every six hours either way, and on demand from the page. spoti.pw is asked
-// first and hands on GitHub's list; the request carries Usage.m's body. GitHub itself is the fallback.
+// opens, at most once every six hours either way, and on demand from the page. remote checks are disabled in Spotifyre; this file remains only for legacy cached release data.
 #import "Core/SGCore.h"
 #import "About.h"
 
-NSString *const SGUpdateURL = @"https://spoti.pw/api/update";
-static NSString *const kGitHubURL = @"https://api.github.com/repos/skopevoj/spoti.pw/releases?per_page=100";
+NSString *const SGUpdateURL = @"";
+static NSString *const kGitHubURL = @"";
 NSString *const SGUpdateCheckedNotification = @"spotifyglass.update.checked.notification";
 
 static NSString *const kChecked = @"spotifyglass.update.checked";
@@ -216,6 +215,8 @@ static void ask(NSString *url, NSData *body, void (^done)(NSArray<NSDictionary *
 }
 
 void SGCheckForUpdate(BOOL force) {
+    // Remote release checks and update telemetry are disabled in Spotifyre.
+    if (SGUpdateURL.length == 0) return;
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSTimeInterval last = [store doubleForKey:kChecked];
     if (sg_running) return;
@@ -244,10 +245,10 @@ void SGCheckForUpdate(BOOL force) {
     };
     NSData *body = SGUsageBody();
     if (body) SGUsageNoteAsked();
-    SGLog(@"update check: asking spoti.pw %@", body ? @"with the usage body" : @"without the usage body");
+    SGLog(@"update check: disabled in this Spotifyre build");
     ask(SGUpdateURL, body, ^(NSArray<NSDictionary *> *releases, NSInteger status, NSError *error) {
         if (releases) return finish(releases, status, error);
-        SGLog(@"update check: spoti.pw answered HTTP %ld, asking GitHub", (long)status);
+        SGLog(@"update check: primary endpoint unavailable, trying configured fallback");
         ask(kGitHubURL, nil, finish);
     });
 }

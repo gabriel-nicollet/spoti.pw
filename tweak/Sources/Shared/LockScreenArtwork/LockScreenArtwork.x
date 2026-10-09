@@ -254,8 +254,6 @@ static SGArtworkWatcher *sg_watcher;
         artwork = sg_artwork;
         key = sg_key;
     }
-    // Lyrics on the cover take the artwork's place: no clip goes out under them.
-    if (SGFlag(SGKeyLockScreenLyricsCover, NO)) { artwork = nil; key = nil; }
     %orig(SGArtworkInInfo(info, artwork, key));
 }
 %end

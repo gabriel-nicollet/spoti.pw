@@ -6,7 +6,7 @@
 #import <UIKit/UIKit.h>
 #import "Settings/SGModPage.h"
 
-extern NSString *const SGUpdateURL;   // spoti.pw's; the site and the repo are in Settings/SGPageStyle.h
+extern NSString *const SGUpdateURL;   // empty in Spotifyre; remote update checks are disabled
 extern NSString *const SGUpdateCheckedNotification;   // on the main thread, after a check ends either way
 
 // One line of a release's changelog: what changed, under the heading Release Please put it under,
@@ -34,7 +34,7 @@ void SGCheckForUpdate(BOOL force);
 UIViewController *SGUpdatePage(void);   // UpdatePage.m: the state and the changelog
 UIViewController *SGLicensesPage(void); // Licenses.m: the mod's license and the third-party ones it ships
 
-// Usage.m: the body the check posts to spoti.pw, nil while the switch is off. The key sits outside
+// Usage.m: legacy usage accounting, no longer sent by Spotifyre. The key sits outside
 // "spotifyglass." so that Reset all settings neither switches the count off nor undoes an opt-out.
 #define SGKeyUsage @"spotipw.usage"
 NSData *SGUsageBody(void);
@@ -65,7 +65,7 @@ NSArray<SGModRow *> *SGCompatibilityWarningRows(void);   // empty when neither
 void SGCheckCompatibilityOnce(void);
 
 // Certificate.m: how this copy is signed, from the provisioning profile inside the app, and for a free
-// Apple ID's 7-day signature a sheet now and then offering a certificate, worded by spoti.pw.
+// Apple ID's 7-day signature; Spotifyre keeps local signing diagnostics but does not offer certificates.
 NSString *SGCertificateKind(void);   // "free", "paid", "enterprise", "none" (no profile), nil if unreadable
 NSDate *SGCertificateExpiry(void);
 SGModRow *SGCertificateRow(void);    // nil unless signed with a free Apple ID

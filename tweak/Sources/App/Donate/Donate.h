@@ -1,10 +1,6 @@
-// Donate: Ko-fi, asked for from the Mod Settings row, a sheet after the first welcome tour (after its
-// restart when the look changed), then two days on and every fourteen after that.
+// Legacy donation API retained as inert stubs for source compatibility; Spotifyre shows no donation prompts.
 #import <UIKit/UIKit.h>
 #import "Settings/SGModPage.h"
-
-extern NSString *const SGKofiURL;
-UIColor *SGKofiColor(void);
 
 void SGShowDonateSheet(void);
 SGModRow *SGDonateRow(void);

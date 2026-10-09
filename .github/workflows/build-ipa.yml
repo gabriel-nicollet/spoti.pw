@@ -50,7 +50,7 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: inputs.upload_method != 'filebin'
         with:
-          name: spoti.ipa
+          name: Spotifyre.ipa
           path: out/*.ipa
           if-no-files-found: error
 

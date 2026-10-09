@@ -1,7 +1,6 @@
 // How this copy is signed, read from the provisioning profile inside the app. A free Apple ID's profile
 // lasts 7 days, so those installs are offered a certificate now and then: a sheet when the signature is
-// about to run out or has been renewed before, and a row in Mod Settings. spoti.pw writes the sheet and
-// can turn it off; nothing of the profile but its kind leaves the phone.
+// about to run out or has been renewed before. Spotifyre does not request or redirect to certificate offers.
 #import "Core/SGCore.h"
 #import "Settings/SGPageStyle.h"
 #import "About.h"
@@ -9,8 +8,8 @@
 #import "App/Donate/Donate.h"
 #import "App/Sheet/SGCardSheet.h"
 
-static NSString *const kOfferURL = @"https://spoti.pw/api/certificate";
-static NSString *const kCertificateURL = @"https://spoti.pw/go/cert";
+static NSString *const kOfferURL = @"";
+static NSString *const kCertificateURL = @"";
 // Outside "spotifyglass." so Reset all settings doesn't bring the sheet back early.
 static NSString *const kProfilesKey = @"spotipw.cert.profiles";
 static NSString *const kShownKey = @"spotipw.cert.shown";
@@ -99,10 +98,8 @@ BOOL SGCertificateOfferShown(void) {
 }
 
 SGModRow *SGCertificateRow(void) {
-    if (!signedFree()) return nil;
-    NSDate *expires = SGCertificateExpiry();
-    NSString *title = expires ? [NSString stringWithFormat:@"Signed until %@", dayOf(expires)] : @"Signed with a free Apple ID";
-    return SGWithSymbol(SGLinkRow(title, @"A free Apple ID signs for 7 days, a certificate for a year", kCertificateURL), @"signature");
+    // Spotifyre does not offer or redirect to third-party certificate services.
+    return nil;
 }
 
 #pragma mark - the sheet
@@ -194,7 +191,7 @@ void SGShowCertificateSheet(NSDictionary *offer, UIImage *logo) {
 // Once a run at most, never in a run with the update notice or the donate sheet, and never over the
 // tour or an alert. The screen is checked again after the request, which can take a while.
 static void offerWhenClear(NSInteger tries) {
-    if (sg_offered || SGUpdateNoticeShown() || SGDonateShown() || !due()) return;
+    if (!kOfferURL.length || sg_offered || SGUpdateNoticeShown() || SGDonateShown() || !due()) return;
     if (screenBusy(SGTopController())) {
         if (tries > 0)
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRetry * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ offerWhenClear(tries - 1); });
@@ -204,7 +201,7 @@ static void offerWhenClear(NSInteger tries) {
     fetchOffer(^(NSDictionary *offer, UIImage *logo) {
         UIViewController *top = SGTopController();
         if (!offer || screenBusy(top) || SGUpdateNoticeShown() || SGDonateShown()) {
-            SGLog(@"certificate: sheet due, not shown (%@)", offer ? @"screen busy" : @"no offer from spoti.pw");
+            SGLog(@"certificate: sheet due, not shown (%@)", offer ? @"screen busy" : @"no offer available");
             return;
         }
         [NSUserDefaults.standardUserDefaults setDouble:NSDate.date.timeIntervalSince1970 forKey:kShownKey];

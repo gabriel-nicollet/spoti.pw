@@ -1,4 +1,5 @@
 // Drag the three texts of a line into size order, largest first.
+#import <CoreImage/CoreImage.h>
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
@@ -118,7 +119,8 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     NSArray<NSString *> *_examples;
     NSInteger _exampleIndex;
     NSInteger _wordIndex;
-    CFTimeInterval _lastStep;
+    CFTimeInterval _lineStartedAt;
+    CGFloat _wordProgress;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -139,9 +141,9 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
 
     _gradient = [CAGradientLayer layer];
     _gradient.colors = @[
-        (id)[UIColor colorWithRed:0.16 green:0.22 blue:0.42 alpha:1].CGColor,
-        (id)[UIColor colorWithRed:0.34 green:0.25 blue:0.43 alpha:1].CGColor,
-        (id)[UIColor colorWithRed:0.47 green:0.34 blue:0.30 alpha:1].CGColor
+        (id)[UIColor colorWithRed:0.14 green:0.28 blue:0.48 alpha:1].CGColor,
+        (id)[UIColor colorWithRed:0.35 green:0.30 blue:0.52 alpha:1].CGColor,
+        (id)[UIColor colorWithRed:0.12 green:0.42 blue:0.43 alpha:1].CGColor
     ];
     _gradient.startPoint = CGPointMake(0.05, 0.10);
     _gradient.endPoint = CGPointMake(0.95, 0.90);
@@ -169,7 +171,7 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
     _link.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
     [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-    _lastStep = CACurrentMediaTime();
+    _lineStartedAt = CACurrentMediaTime();
     [self refreshPreview];
     return self;
 }
@@ -185,8 +187,16 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     CGFloat inset = 22.0;
     CGFloat width = MAX(1.0, self.bounds.size.width - inset * 2.0);
     CGFloat size = SGRLyricsStyleFontSize();
-    _currentLabel.frame = CGRectMake(inset, 28.0, width, size * 3.0 + SGRLyricsStyleLineGap() * 2.0);
-    _nextLabel.frame = CGRectMake(inset, self.bounds.size.height - 48.0, width, 28.0);
+    CGSize fitting = [_currentLabel sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)];
+    CGFloat currentHeight = MIN(MAX(size * 1.15, fitting.height), self.bounds.size.height * 0.64);
+    CGFloat currentY = 26.0;
+    _currentLabel.frame = CGRectMake(inset, currentY, width, currentHeight);
+    // Line spacing is the gap between the active and upcoming lyric rows, not paragraph spacing.
+    CGFloat nextY = CGRectGetMaxY(_currentLabel.frame) + SGRLyricsStyleLineGap();
+    CGFloat nextHeight = 32.0;
+    if (nextY + nextHeight > self.bounds.size.height - 12.0)
+        nextY = MAX(currentY + currentHeight + 4.0, self.bounds.size.height - nextHeight - 12.0);
+    _nextLabel.frame = CGRectMake(inset, nextY, width, nextHeight);
 }
 
 - (void)styleDidChange:(NSNotification *)notification {
@@ -195,16 +205,29 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
 }
 
 - (void)tick:(CADisplayLink *)link {
-    CFTimeInterval now = CACurrentMediaTime();
-    if (now - _lastStep < 0.34) return;
-    _lastStep = now;
-
+    CFTimeInterval now = link.timestamp;
     NSArray<NSString *> *words = [_examples[_exampleIndex] componentsSeparatedByString:@" "];
-    _wordIndex++;
-    if (_wordIndex >= (NSInteger)words.count) {
-        _wordIndex = 0;
-        _exampleIndex = (_exampleIndex + 1) % (NSInteger)_examples.count;
+    const CFTimeInterval wordDuration = 0.58;
+    CFTimeInterval elapsed = MAX(0, now - _lineStartedAt);
+    NSInteger step = (NSInteger)(elapsed / wordDuration);
+    if (step >= (NSInteger)words.count) {
+        NSInteger nextIndex = (_exampleIndex + 1) % (NSInteger)_examples.count;
+        _exampleIndex = nextIndex;
+        _lineStartedAt = now;
+        _wordProgress = 0;
+            _currentLabel.alpha = 0.25;
+        _currentLabel.transform = CGAffineTransformMakeTranslation(0, 8);
+        [self refreshPreview];
+        [UIView animateWithDuration:0.32 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
+            self->_currentLabel.alpha = 1;
+            self->_currentLabel.transform = CGAffineTransformIdentity;
+        } completion:nil];
+        return;
     }
+    _wordIndex = step;
+    _wordProgress = (CGFloat)((elapsed - step * wordDuration) / wordDuration);
+    // Keep the small preview lightweight: update text only when the swept word changes or the highlight
+    // has moved enough to be visibly smooth at ordinary display rates.
     [self refreshPreview];
 }
 
@@ -216,7 +239,6 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     CGFloat dim = SGRLyricsStyleDim();
     CGFloat blur = SGRLyricsStyleBlur();
     CGFloat bloom = SGRLyricsStyleBloom() / 100.0;
-    CGFloat lineGap = SGRLyricsStyleLineGap();
 
     NSString *text = _examples[_exampleIndex];
     NSArray<NSString *> *words = [text componentsSeparatedByString:@" "];
@@ -224,7 +246,7 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
     paragraph.alignment = NSTextAlignmentLeft;
     paragraph.lineBreakMode = NSLineBreakByWordWrapping;
-    paragraph.lineSpacing = MAX(0, lineGap - font.lineHeight * 0.15);
+    paragraph.lineSpacing = 2.0; // independent of the current-to-next lyric spacing control
 
     NSMutableAttributedString *current = [[NSMutableAttributedString alloc] initWithString:text];
     NSRange all = NSMakeRange(0, current.length);
@@ -238,21 +260,19 @@ static const CGFloat kLyricsStylePreviewHeight = 220.0;
     for (NSInteger i = 0; i < (NSInteger)words.count; i++) {
         NSString *word = words[i];
         NSRange wordRange = NSMakeRange(location, word.length);
-        if (i == _wordIndex) {
-            [current addAttribute:NSForegroundColorAttributeName value:UIColor.whiteColor range:wordRange];
-            if (bloom > 0) {
-                NSShadow *shadow = [NSShadow new];
-                shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.9, bloom)];
-                shadow.shadowBlurRadius = 5.0 + 16.0 * bloom;
-                shadow.shadowOffset = CGSizeZero;
-                [current addAttribute:NSShadowAttributeName value:shadow range:wordRange];
-            }
+        CGFloat alpha = i < _wordIndex ? 1.0 : (i == _wordIndex ? MAX(0.18, (1.0 - dim) + (1.0 - MAX(0.18, 1.0 - dim)) * _wordProgress) : MAX(0.18, 1.0 - dim));
+        [current addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:alpha] range:wordRange];
+        if (i == _wordIndex && bloom > 0) {
+            NSShadow *shadow = [NSShadow new];
+            shadow.shadowColor = [UIColor colorWithWhite:1 alpha:MIN(0.9, bloom)];
+            shadow.shadowBlurRadius = 5.0 + 16.0 * bloom;
+            shadow.shadowOffset = CGSizeZero;
+            [current addAttribute:NSShadowAttributeName value:shadow range:wordRange];
         }
         location += word.length + 1;
     }
 
     _currentLabel.attributedText = current;
-
     NSString *nextText = _examples[(_exampleIndex + 1) % (NSInteger)_examples.count];
     UIFont *nextFont = [UIFont systemFontOfSize:MAX(14.0, size * 0.58) weight:weight];
     _nextLabel.attributedText = [[NSAttributedString alloc] initWithString:nextText attributes:@{
@@ -292,8 +312,10 @@ CGFloat SGRLyricsStyleFontSize(void) {
 }
 
 CGFloat SGRLyricsStyleFontWeight(void) {
-    double value = [NSUserDefaults.standardUserDefaults doubleForKey:SGRKeyLyricsStyleFontWeight];
-    return value > 0.0 ? (CGFloat)value : SGRLyricsStyleDefaultFontWeight();
+    id stored = [NSUserDefaults.standardUserDefaults objectForKey:SGRKeyLyricsStyleFontWeight];
+    if (![stored respondsToSelector:@selector(doubleValue)]) return SGRLyricsStyleDefaultFontWeight();
+    CGFloat value = (CGFloat)[stored doubleValue];
+    return MIN(UIFontWeightBlack, MAX(UIFontWeightUltraLight, value));
 }
 
 CGFloat SGRLyricsStyleLineGap(void) {

@@ -409,7 +409,7 @@ SGLyricsAsk SGSpicyLyricsAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResu
     NSDictionary<NSString *, NSString *> *headers = @{
         @"Authorization": [@"Bearer " stringByAppendingString:key],
         @"Accept": @"application/json",
-        @"User-Agent": @"spoti.pw " @SG_VERSION @" (https://github.com/skopevoj/spoti.pw)",
+        @"User-Agent": @"Spotifyre/" @SG_VERSION,
     };
     SGLyricsGetJSONReply(url, headers, ^(id root, NSHTTPURLResponse *response) {
         done(answer(trackID, key, root, response));

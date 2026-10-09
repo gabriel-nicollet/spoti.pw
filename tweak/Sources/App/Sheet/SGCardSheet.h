@@ -1,4 +1,4 @@
-// The card the Ko-fi ask and the certificate offer rise in: a glowing disc, a title, a line or two, one
+// The reusable card sheet: a glowing disc, a title, a line or two, one
 // glowing button and a quiet way out, over the dimmed screen.
 #import <UIKit/UIKit.h>
 

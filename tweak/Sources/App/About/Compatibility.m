@@ -37,7 +37,7 @@ static NSArray<SGIncompatibility *> *incompatibilities(void) {
             wrong.title = [NSString stringWithFormat:@"Spotify %@ isn't supported", version];
             wrong.subtitle = [NSString stringWithFormat:@"The mod is made for %@ only", SGSupportedSpotifyVersion];
             wrong.message = [NSString stringWithFormat:
-                @"spoti.pw is made for Spotify %@ only. On any other version parts of it break or go missing, "
+                @"Spotifyre is made for Spotify %@ only. On any other version parts of it break or go missing, "
                 @"so it won't work the way you expect.\n\n%@ Use a %@ IPA instead.",
                 SGSupportedSpotifyVersion, kReportLine, SGSupportedSpotifyVersion];
             wrong.key = @"spotifyglass.spotifyversion.warned";
@@ -47,9 +47,9 @@ static NSArray<SGIncompatibility *> *incompatibilities(void) {
         if (SGEeveeLoaded()) {
             SGIncompatibility *eevee = [SGIncompatibility new];
             eevee.title = @"EeveeSpotify isn't supported";
-            eevee.subtitle = @"It is injected alongside spoti.pw";
+            eevee.subtitle = @"It is injected alongside Spotifyre";
             eevee.message = [NSString stringWithFormat:
-                @"spoti.pw isn't made to run alongside EeveeSpotify. Both change the same parts of Spotify, "
+                @"Spotifyre isn't made to run alongside EeveeSpotify. Both change the same parts of Spotify, "
                 @"so things break or behave in ways you don't expect.\n\n%@ Use an IPA without EeveeSpotify instead.",
                 kReportLine];
             eevee.key = @"spotifyglass.eevee.warned";

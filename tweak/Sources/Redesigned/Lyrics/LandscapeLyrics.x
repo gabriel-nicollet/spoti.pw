@@ -41,32 +41,62 @@ static UIWindowScene *activeScene(void) {
     return nil;
 }
 
-// The page came or went: the controllers are asked again, and on the way out the scene is put back upright.
-static void pageChanged(BOOL onScreen) {
-    if (onScreen == sg_pageOnScreen) return;
-    sg_pageOnScreen = onScreen;
-    if (!SGFlag(SGRKeyLyricsLandscape, NO) && onScreen) return;
-    UIWindowScene *scene = activeScene();
-    for (UIWindow *window in scene.windows) [window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
-    if (!scene) return;
+static void invalidateOrientation(UIViewController *controller) {
+    if (!controller) return;
+    if (@available(iOS 16.0, *)) [controller setNeedsUpdateOfSupportedInterfaceOrientations];
+    for (UIViewController *child in controller.childViewControllers) invalidateOrientation(child);
+    invalidateOrientation(controller.presentedViewController);
+}
 
-    if (onScreen) {
-        if (@available(iOS 16.0, *)) {
-            UIWindowSceneGeometryPreferencesIOS *wide =
-                [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
-            [scene requestGeometryUpdateWithPreferences:wide errorHandler:^(NSError *error) {
-                SGLog(@"landscape lyrics: could not turn sideways: %@", error.localizedDescription);
-            }];
-        }
-    } else if (UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) {
-        if (@available(iOS 16.0, *)) {
-            UIWindowSceneGeometryPreferencesIOS *upright =
-                [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait];
-            [scene requestGeometryUpdateWithPreferences:upright errorHandler:^(NSError *error) {
-                SGLog(@"landscape lyrics: could not turn back upright: %@", error.localizedDescription);
-            }];
-        }
+static UIInterfaceOrientationMask maskForDeviceOrientation(void) {
+    UIDeviceOrientation orientation = UIDevice.currentDevice.orientation;
+    if (orientation == UIDeviceOrientationLandscapeLeft) return UIInterfaceOrientationMaskLandscapeRight;
+    if (orientation == UIDeviceOrientationLandscapeRight) return UIInterfaceOrientationMaskLandscapeLeft;
+    if (orientation == UIDeviceOrientationPortrait || orientation == UIDeviceOrientationPortraitUpsideDown)
+        return UIInterfaceOrientationMaskPortrait;
+    return 0;
+}
+
+static void requestMask(UIWindowScene *scene, UIInterfaceOrientationMask mask) {
+    if (!scene || !mask) return;
+    if (@available(iOS 16.0, *)) {
+        UIWindowSceneGeometryPreferencesIOS *preferences = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:mask];
+        [scene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError *error) {
+            SGLog(@"landscape lyrics: geometry request failed (mask %lu): %@", (unsigned long)mask, error.localizedDescription);
+        }];
     }
+}
+
+static void deviceOrientationChanged(NSNotification *note) {
+    (void)note;
+    if (!landscapeNow()) return;
+    UIInterfaceOrientationMask mask = maskForDeviceOrientation();
+    if (!mask) return;
+    UIWindowScene *scene = activeScene();
+    for (UIWindow *window in scene.windows) invalidateOrientation(window.rootViewController);
+    requestMask(scene, mask);
+}
+
+// The page came or went: refresh the whole controller chain and follow the device while it is visible.
+static void pageChanged(BOOL onScreen) {
+    sg_pageOnScreen = onScreen;
+    UIWindowScene *scene = activeScene();
+    for (UIWindow *window in scene.windows) invalidateOrientation(window.rootViewController);
+    if (!scene) return;
+    if (!onScreen) {
+        requestMask(scene, UIInterfaceOrientationMaskPortrait);
+        return;
+    }
+    if (!SGFlag(SGRKeyLyricsLandscape, NO)) return;
+    UIInterfaceOrientationMask mask = maskForDeviceOrientation();
+    if (!mask && UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) mask = UIInterfaceOrientationMaskLandscape;
+    if (mask) requestMask(scene, mask);
+}
+
+static BOOL containsLyricsFullscreenView(UIView *view) {
+    if ([NSStringFromClass(view.class) isEqualToString:@"_TtC32Lyrics_FullscreenElementPageImpl14FullscreenView"]) return YES;
+    for (UIView *child in view.subviews) if (containsLyricsFullscreenView(child)) return YES;
+    return NO;
 }
 
 %hook _TtC32Lyrics_FullscreenElementPageImpl14FullscreenView
@@ -78,6 +108,15 @@ static void pageChanged(BOOL onScreen) {
 %end
 
 %hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (containsLyricsFullscreenView(self.view)) dispatch_async(dispatch_get_main_queue(), ^{ pageChanged(YES); });
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    BOOL wasLyrics = containsLyricsFullscreenView(self.view);
+    %orig;
+    if (wasLyrics) dispatch_async(dispatch_get_main_queue(), ^{ pageChanged(NO); });
+}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
     return landscapeNow() ? UIInterfaceOrientationMaskAllButUpsideDown : %orig;
 }
@@ -90,6 +129,9 @@ static void pageChanged(BOOL onScreen) {
     if (!SGRedesignedUI()) return;
     %init;
     SGRequireClasses(@[@"_TtC32Lyrics_FullscreenElementPageImpl14FullscreenView"]);
+    [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
+    [NSNotificationCenter.defaultCenter addObserverForName:UIDeviceOrientationDidChangeNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) { deviceOrientationChanged(note); }];
     Class delegate = NSClassFromString(@"_TtC24MusicApp_ContainerWiring18SpotifyAppDelegate");
     SEL selector = @selector(application:supportedInterfaceOrientationsForWindow:);
     if (!delegate) return;

@@ -36,17 +36,17 @@ static UIImage *blurred(UIImage *cover, CGSize size) {
 
 // The largest size, from `start` down, at which `text` fits `width` in at most `lines` lines.
 static UIFont *fitted(NSString *text, CGFloat start, CGFloat width, NSUInteger lines, UIFontWeight weight) {
-    for (CGFloat size = start; size > 10; size -= 2) {
+    for (CGFloat size = start; size > 8; size -= 1) {
         UIFont *font = [UIFont systemFontOfSize:size weight:weight];
         CGRect box = [text boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
                                      attributes:@{NSFontAttributeName: font} context:nil];
         if (ceil(box.size.height) <= ceil(font.lineHeight) * lines + 1) return font;
     }
-    return [UIFont systemFontOfSize:10 weight:weight];
+    return [UIFont systemFontOfSize:8 weight:weight];
 }
 
 UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *current, NSString *next, CGSize size) {
-    if (size.width < 8 || size.height < 8 || size.width > 4096 || size.height > 4096) size = CGSizeMake(600, 600);
+    if (size.width < 8 || size.height < 8 || size.width > 4096 || size.height > 4096) size = CGSizeMake(600, 800);
     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
     format.scale = MAX(2.0, UIScreen.mainScreen.scale);
     format.opaque = YES;
@@ -61,14 +61,14 @@ UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *curren
             CGSize drawn = CGSizeMake(picture.size.width * scale, picture.size.height * scale);
             [picture drawInRect:CGRectMake((size.width - drawn.width) / 2, (size.height - drawn.height) / 2, drawn.width, drawn.height)];
         }
-        [[UIColor colorWithWhite:0 alpha:back ? 0.38 : 0.25] setFill];
+        [[UIColor colorWithWhite:0 alpha:back ? 0.28 : 0.18] setFill];
         UIRectFill(all);
 
         CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
         NSArray *colors = @[
-            (id)[UIColor colorWithRed:0.25 green:0.18 blue:0.42 alpha:0.28].CGColor,
-            (id)[UIColor colorWithRed:0.58 green:0.28 blue:0.22 alpha:0.20].CGColor,
-            (id)[UIColor colorWithRed:0.18 green:0.34 blue:0.48 alpha:0.18].CGColor
+            (id)[UIColor colorWithRed:0.16 green:0.30 blue:0.52 alpha:0.34].CGColor,
+            (id)[UIColor colorWithRed:0.36 green:0.30 blue:0.55 alpha:0.28].CGColor,
+            (id)[UIColor colorWithRed:0.10 green:0.42 blue:0.43 alpha:0.24].CGColor
         ];
         CGFloat locations[] = {0.0, 0.5, 1.0};
         CGGradientRef gradient = CGGradientCreateWithColors(space, (__bridge CFArrayRef)colors, locations);
@@ -78,7 +78,7 @@ UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *curren
         CGGradientRelease(gradient);
         CGColorSpaceRelease(space);
 
-        CGFloat margin = size.width * 0.09, width = size.width - margin * 2, gap = size.height * 0.035;
+        CGFloat margin = size.width * 0.075, width = size.width - margin * 2, gap = size.height * 0.025;
         NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
         style.alignment = NSTextAlignmentCenter;
         NSShadow *shadow = [NSShadow new];
@@ -87,17 +87,17 @@ UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *curren
         UIFont *main = fitted(current ?: @"", size.width * (0.105 + MIN(0.045, MAX(0.0, (SGRLyricsStyleFontSize() - 20.0) / 24.0 * 0.045))), width, 5, SGRLyricsStyleFontWeight());
         UIFont *small = [UIFont systemFontOfSize:MAX(10, main.pointSize * 0.55) weight:UIFontWeightSemibold];
         // Heights first, so the line being sung sits at the middle however long the others are.
-        CGSize (^measure)(NSString *, UIFont *) = ^CGSize(NSString *text, UIFont *font) {
+        CGSize (^measure)(NSString *, UIFont *, CGFloat) = ^CGSize(NSString *text, UIFont *font, CGFloat maxHeight) {
             if (!text.length) return CGSizeZero;
-            CGRect box = [text boundingRectWithSize:CGSizeMake(width, size.height * 0.28) options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
+            CGRect box = [text boundingRectWithSize:CGSizeMake(width, maxHeight) options:NSStringDrawingUsesLineFragmentOrigin
                                          attributes:@{NSFontAttributeName: font, NSParagraphStyleAttributeName: style} context:nil];
-            return CGSizeMake(width, ceil(box.size.height));
+            return CGSizeMake(width, MIN(maxHeight, ceil(box.size.height)));
         };
-        CGSize mainSize = measure(current, main), previousSize = measure(previous, small), nextSize = measure(next, small);
+        CGSize mainSize = measure(current, main, size.height * 0.52), previousSize = measure(previous, small, size.height * 0.16), nextSize = measure(next, small, size.height * 0.16);
         CGFloat middle = size.height / 2;
         void (^draw)(NSString *, UIFont *, CGFloat, CGRect, CGFloat) = ^(NSString *text, UIFont *font, CGFloat alpha, CGRect box, CGFloat unused) {
             if (!text.length) return;
-            [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine attributes:@{
+            [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin attributes:@{
                 NSFontAttributeName: font, NSParagraphStyleAttributeName: style, NSShadowAttributeName: shadow,
                 NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:alpha]} context:nil];
         };

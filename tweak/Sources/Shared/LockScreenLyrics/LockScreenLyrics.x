@@ -16,7 +16,7 @@ static const NSTimeInterval kTick = 0.25;
 // Past a line's sung end by this much, with the next line at least this far off, the artist comes back.
 static const NSInteger kBreakMs = 4000;
 // About what the lock screen's artist row fits before it cuts the text off.
-static const NSUInteger kMaxChars = 30;
+static const NSUInteger kMaxChars = 48;
 
 // Spotify may set the info from any thread; the timer reads it on the main one.
 static NSObject *sg_lock;
@@ -102,8 +102,10 @@ static NSString *lineFor(NSDictionary *info, double elapsed, NSArray<NSString *>
 // MPMediaItemArtwork) and asks it for its image whenever the system asks for a size.
 static MPMediaItemArtwork *coverFor(MPMediaItemArtwork *base, NSArray<NSString *> *around) {
     NSString *previous = around[0].length ? around[0] : nil, *current = around[1], *next = around[2].length ? around[2] : nil;
-    CGSize bounds = base ? base.bounds.size : CGSizeMake(600, 600);
-    if (bounds.width < 1 || bounds.height < 1) bounds = CGSizeMake(600, 600);
+    CGSize bounds = base ? base.bounds.size : CGSizeMake(600, 800);
+    if (bounds.width < 1 || bounds.height < 1) bounds = CGSizeMake(600, 800);
+    // Ask the system for a tall 3:4 lyrics artwork canvas instead of inheriting the square album cover.
+    if (bounds.height <= bounds.width * 1.1) bounds = CGSizeMake(bounds.width, bounds.width * (4.0 / 3.0));
     return [[SGLyricsCoverArtwork alloc] initWithBoundsSize:bounds requestHandler:^UIImage *(CGSize size) {
         UIImage *cover = [base imageWithSize:size] ?: [base imageWithSize:base.bounds.size];
         return SGLyricsCoverImage(cover, previous, current, next, size);
