@@ -1,0 +1,351 @@
+diff --git a/tweak/Sources/Redesigned/Lyrics/SingSettings.m b/tweak/Sources/Redesigned/Lyrics/SingSettings.m
+index 0f1389c..7443b09 100644
+--- a/tweak/Sources/Redesigned/Lyrics/SingSettings.m
++++ b/tweak/Sources/Redesigned/Lyrics/SingSettings.m
+@@ -112,8 +112,8 @@ static SGModSection *karaokeSection(void) {
+     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
+     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
+     SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep the vocals focused in front", SGRKeySingSpatialVoice);
+-    spatial.info = @"Centers the separated vocal stem while retaining a small amount of stereo ambience. "
+-                   @"The instrumental is left untouched, and the Sing slider still controls the mix from 0 to 110 percent.";
++    spatial.info = @"Keeps the separated singer in front as you turn your head, when compatible headphone motion is available. "
++                   @"Adds subtle distance and room reflections; the instrumental stereo image is preserved, and the Sing slider still controls the mix from 0 to 110 percent.";
+     spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); };
+     SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
+     model.progress = ^double {
+diff --git a/tweak/Sources/Shared/Sing/SGSingController.h b/tweak/Sources/Shared/Sing/SGSingController.h
+index 76f85b3..67ec6dc 100644
+--- a/tweak/Sources/Shared/Sing/SGSingController.h
++++ b/tweak/Sources/Shared/Sing/SGSingController.h
+@@ -25,8 +25,8 @@ void SGSingSetVocalLevel(float level);
+ // still decides whether it runs; this changes what it plays. Safe before Sing is configured.
+ BOOL SGSingVocalsOnly(void);
+ void SGSingSetVocalsOnly(BOOL vocalsOnly);
+-// Spatial Voice focuses the separated vocal stem in the center/front image while leaving
+-// the existing 0-110% Sing level mapping unchanged.
++// Spatial Voice head-tracks the separated vocal stem when compatible headphone motion is
++// available; without it, the voice stays front/center. The 0-110% Sing mapping is unchanged.
+ BOOL SGSingSpatialVoice(void);
+ void SGSingSetSpatialVoice(BOOL enabled);
+ void SGSingSetEnabled(BOOL enabled);
+diff --git a/tweak/Sources/Shared/Sing/SGSingController.m b/tweak/Sources/Shared/Sing/SGSingController.m
+index c851f3b..4ad7d88 100644
+--- a/tweak/Sources/Shared/Sing/SGSingController.m
++++ b/tweak/Sources/Shared/Sing/SGSingController.m
+@@ -4,6 +4,7 @@
+ #import "SGSingFormat.h"
+ #import "SGSingModel.h"
+ #import "SGSingDSP.h"
++#import "SGSpatialVoiceMotion.h"
+ #import "SGStemWorker.h"
+ #import "Shared/Audio/SGAudioPipeline.h"
+ #import "Shared/Player/PlayerState.h"
+@@ -476,6 +477,7 @@ void SGSingSetVocalsOnly(BOOL vocalsOnly) {
+ BOOL SGSingSpatialVoice(void) { return SGSingDSPSpatialVoice(); }
+ void SGSingSetSpatialVoice(BOOL enabled) {
+     SGSingDSPSetSpatialVoice(enabled);
++    SGSpatialVoiceMotionSetEnabled(enabled);
+     [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
+ }
+ void SGSingSetEnabled(BOOL enabled) {
+diff --git a/tweak/Sources/Shared/Sing/SGSingDSP.h b/tweak/Sources/Shared/Sing/SGSingDSP.h
+index e5d0ab1..3cc75cd 100644
+--- a/tweak/Sources/Shared/Sing/SGSingDSP.h
++++ b/tweak/Sources/Shared/Sing/SGSingDSP.h
+@@ -10,6 +10,12 @@ typedef struct {
+     double sampleRate;
+     float instrumental, instrumentalTarget, instrumentalStep;
+     bool vocalsOnly;
++    // Per-mixer state for the real-time spatial vocal renderer.
++    float spatialAzimuth;
++    float spatialITD[64];
++    uint32_t spatialITDIndex;
++    float spatialRoomL[1024], spatialRoomR[1024];
++    uint32_t spatialRoomIndex;
+ } SGSingMixer;
+ 
+ void SGSingMixerInit(SGSingMixer *mixer, double sampleRate, float level);
+@@ -17,7 +23,8 @@ void SGSingMixerSetLevel(SGSingMixer *mixer, float level);
+ void SGSingMixerSetVocalsOnly(SGSingMixer *mixer, float level, bool vocalsOnly);
+ void SGSingMixerProcess(SGSingMixer *mixer, const float *original, const float *vocals, float *output, uint32_t frames);
+ void SGSingMixerBypass(SGSingMixer *mixer);
+-// Spatial Voice focuses the separated vocal stem toward the center/front image without
+-// changing the existing Sing level curve.
++// Spatial Voice renders only the separated vocal stem; the instrumental path stays stereo.
+ void SGSingDSPSetSpatialVoice(bool enabled);
++// Relative source azimuth in degrees: negative is left, positive is right. Thread-safe.
++void SGSingDSPSetSpatialAzimuthDegrees(float degrees);
+ bool SGSingDSPSpatialVoice(void);
+diff --git a/tweak/Sources/Shared/Sing/SGSingDSP.m b/tweak/Sources/Shared/Sing/SGSingDSP.m
+index ea6e454..795c6db 100644
+--- a/tweak/Sources/Shared/Sing/SGSingDSP.m
++++ b/tweak/Sources/Shared/Sing/SGSingDSP.m
+@@ -5,9 +5,19 @@
+ static const double kLevelRampSeconds = 0.030;
+ static const double kBypassRampSeconds = 0.120;
+ static atomic_bool sg_spatialVoice = false;
++static atomic_int sg_spatialAzimuthMilliDegrees = 0;
+ 
+-void SGSingDSPSetSpatialVoice(bool enabled) { atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed); }
++void SGSingDSPSetSpatialVoice(bool enabled) {
++    atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed);
++    if (!enabled) atomic_store_explicit(&sg_spatialAzimuthMilliDegrees, 0, memory_order_relaxed);
++}
+ bool SGSingDSPSpatialVoice(void) { return atomic_load_explicit(&sg_spatialVoice, memory_order_relaxed); }
++void SGSingDSPSetSpatialAzimuthDegrees(float degrees) {
++    if (!isfinite(degrees)) degrees = 0;
++    if (degrees < -75.0f) degrees = -75.0f;
++    if (degrees > 75.0f) degrees = 75.0f;
++    atomic_store_explicit(&sg_spatialAzimuthMilliDegrees, (int)lrintf(degrees * 1000.0f), memory_order_relaxed);
++}
+ 
+ static void ramp(SGSingMixer *m,
+                  float to,
+@@ -95,41 +105,75 @@ void SGSingMixerProcess(SGSingMixer *m,
+                         const float *vocals,
+                         float *out,
+                         uint32_t frames) {
++    const bool spatial = SGSingDSPSpatialVoice();
++    const float targetAzimuth = spatial
++        ? (float)atomic_load_explicit(&sg_spatialAzimuthMilliDegrees, memory_order_relaxed) * (float)(3.14159265358979323846 / 180000.0)
++        : 0.0f;
++    const float azimuthLimit = 1.3090f; // 75 degrees
++    const float alpha = (float)(1.0 - exp(-1.0 / (m->sampleRate * 0.020)));
++    const uint32_t maxITD = (uint32_t)fmin(31.0, m->sampleRate * 0.00065);
++    const uint32_t roomDelayL = (uint32_t)fmin(1023.0, m->sampleRate * 0.013);
++    const uint32_t roomDelayR = (uint32_t)fmin(1023.0, m->sampleRate * 0.019);
++
+     for (uint32_t i = 0; i < frames; i++) {
+         if (m->remaining) {
+             m->gain += m->step;
+             m->instrumental += m->instrumentalStep;
+-
+             if (!--m->remaining) {
+                 m->gain = m->targetGain;
+                 m->instrumental = m->instrumentalTarget;
+             }
+         }
+ 
+-        for (unsigned c = 0; c < 2; c++) {
+-            size_t at = (size_t)i * 2 + c;
+-
+-            float source = isfinite(original[at]) ? original[at] : 0;
+-            float vocal = isfinite(vocals[at]) ? vocals[at] : 0;
+-
+-            if (SGSingDSPSpatialVoice()) {
+-                size_t leftAt = (size_t)i * 2;
+-                size_t rightAt = leftAt + 1;
+-                float left = isfinite(vocals[leftAt]) ? vocals[leftAt] : 0;
+-                float right = isfinite(vocals[rightAt]) ? vocals[rightAt] : 0;
+-                // The separated vocal stem is often already narrow. Keep only its mid channel
+-                // so Spatial Voice produces a deterministic front/center vocal instead of an
+-                // almost inaudible 75% side reduction.
+-                float mid = 0.5f * (left + right);
+-                vocal = mid;
+-            }
+-
+-            // instrumental = original - vocal
+-            float value =
+-                m->instrumental * (source - vocal)
+-                + m->gain * vocal;
+-
+-            out[at] = fmaxf(-1, fminf(1, value));
++        float sourceL = isfinite(original[(size_t)i * 2]) ? original[(size_t)i * 2] : 0;
++        float sourceR = isfinite(original[(size_t)i * 2 + 1]) ? original[(size_t)i * 2 + 1] : 0;
++        float vocalL = isfinite(vocals[(size_t)i * 2]) ? vocals[(size_t)i * 2] : 0;
++        float vocalR = isfinite(vocals[(size_t)i * 2 + 1]) ? vocals[(size_t)i * 2 + 1] : 0;
++        float spatialL = vocalL, spatialR = vocalR;
++
++        if (spatial) {
++            // Smooth head motion to avoid zipper noise. A mono source is panned in the
++            // listener's frame; the short far-ear delay and quiet reflections add depth.
++            m->spatialAzimuth += (targetAzimuth - m->spatialAzimuth) * alpha;
++            if (m->spatialAzimuth < -azimuthLimit) m->spatialAzimuth = -azimuthLimit;
++            if (m->spatialAzimuth > azimuthLimit) m->spatialAzimuth = azimuthLimit;
++            float mono = 0.5f * (vocalL + vocalR) * 0.84f; // slightly farther than dry/center
++            float pan = sinf(m->spatialAzimuth) / sinf(azimuthLimit);
++            if (pan < -1) pan = -1;
++            if (pan > 1) pan = 1;
++            float dryL = mono * sqrtf(0.5f * (1.0f - pan));
++            float dryR = mono * sqrtf(0.5f * (1.0f + pan));
++
++            uint32_t delayL = m->spatialAzimuth > 0 ? maxITD : 0;
++            uint32_t delayR = m->spatialAzimuth < 0 ? maxITD : 0;
++            uint32_t write = m->spatialITDIndex;
++            m->spatialITD[write] = mono;
++            uint32_t readL = (write + 64 - delayL) & 63;
++            uint32_t readR = (write + 64 - delayR) & 63;
++            float delayedL = m->spatialITD[readL];
++            float delayedR = m->spatialITD[readR];
++            m->spatialITDIndex = (write + 1) & 63;
++            // Blend the delayed far ear very lightly so localization stays stable.
++            if (delayL) dryL = dryL * 0.92f + delayedL * sqrtf(0.5f * (1.0f - pan)) * 0.08f;
++            if (delayR) dryR = dryR * 0.92f + delayedR * sqrtf(0.5f * (1.0f + pan)) * 0.08f;
++
++            uint32_t roomAt = m->spatialRoomIndex;
++            uint32_t tapL = (roomAt + 1024 - roomDelayL) & 1023;
++            uint32_t tapR = (roomAt + 1024 - roomDelayR) & 1023;
++            float reflectionL = m->spatialRoomL[tapL];
++            float reflectionR = m->spatialRoomR[tapR];
++            m->spatialRoomL[roomAt] = dryL + reflectionL * 0.18f;
++            m->spatialRoomR[roomAt] = dryR + reflectionR * 0.18f;
++            m->spatialRoomIndex = (roomAt + 1) & 1023;
++            spatialL = dryL + reflectionL * 0.14f;
++            spatialR = dryR + reflectionR * 0.14f;
+         }
++
++        // Remove the original separated vocal per channel, then add the processed vocal.
++        // This keeps the instrumental's stereo image intact instead of centering its side signal.
++        float valueL = m->instrumental * (sourceL - vocalL) + m->gain * spatialL;
++        float valueR = m->instrumental * (sourceR - vocalR) + m->gain * spatialR;
++        out[(size_t)i * 2] = fmaxf(-1, fminf(1, valueL));
++        out[(size_t)i * 2 + 1] = fmaxf(-1, fminf(1, valueR));
+     }
+ }
+diff --git a/tweak/Sources/Shared/Sing/SGSpatialVoiceMotion.h b/tweak/Sources/Shared/Sing/SGSpatialVoiceMotion.h
+new file mode 100644
+index 0000000..46e4502
+--- /dev/null
++++ b/tweak/Sources/Shared/Sing/SGSpatialVoiceMotion.h
+@@ -0,0 +1,5 @@
++#pragma once
++#import <Foundation/Foundation.h>
++
++// Enables/disables AirPods head-motion input for the custom Spatial Voice renderer.
++void SGSpatialVoiceMotionSetEnabled(BOOL enabled);
+diff --git a/tweak/Sources/Shared/Sing/SGSpatialVoiceMotion.m b/tweak/Sources/Shared/Sing/SGSpatialVoiceMotion.m
+new file mode 100644
+index 0000000..dd69a5d
+--- /dev/null
++++ b/tweak/Sources/Shared/Sing/SGSpatialVoiceMotion.m
+@@ -0,0 +1,130 @@
++#import <CoreMotion/CoreMotion.h>
++#import <Foundation/Foundation.h>
++#include <math.h>
++#include <stdatomic.h>
++#import "SGSingDSP.h"
++
++// Reads AirPods head motion only while Spatial Voice is enabled. This feeds a small custom
++// binaural renderer; it does not rely on Apple's restricted automatic head-pose renderer.
++@interface SGSpatialVoiceMotion : NSObject <CMHeadphoneMotionManagerDelegate>
+++ (instancetype)shared;
++- (void)setEnabled:(BOOL)enabled;
++@end
++
++@implementation SGSpatialVoiceMotion {
++    CMHeadphoneMotionManager *_manager;
++    NSOperationQueue *_queue;
++    atomic_bool _enabled;
++    BOOL _hasReference;
++    double _referenceYaw;
++    double _turnedAwaySince;
++}
++
+++ (instancetype)shared {
++    static SGSpatialVoiceMotion *instance;
++    static dispatch_once_t once;
++    dispatch_once(&once, ^{ instance = [SGSpatialVoiceMotion new]; });
++    return instance;
++}
++
++- (instancetype)init {
++    if (!(self = [super init])) return nil;
++    _queue = [NSOperationQueue new];
++    _queue.name = @"spotifyglass.spatialvoice.motion";
++    _queue.maxConcurrentOperationCount = 1;
++    _queue.qualityOfService = NSQualityOfServiceUserInitiated;
++    atomic_init(&_enabled, false);
++    return self;
++}
++
++- (void)setEnabled:(BOOL)enabled {
++    if (![NSThread isMainThread]) {
++        dispatch_async(dispatch_get_main_queue(), ^{ [self setEnabled:enabled]; });
++        return;
++    }
++    if (atomic_load_explicit(&_enabled, memory_order_relaxed) == enabled) return;
++    atomic_store_explicit(&_enabled, enabled, memory_order_relaxed);
++    [_queue addOperationWithBlock:^{ self->_hasReference = NO; self->_turnedAwaySince = 0; }];
++    if (!enabled) {
++        [_manager stopDeviceMotionUpdates];
++        SGSingDSPSetSpatialAzimuthDegrees(0);
++        return;
++    }
++
++    if (CMHeadphoneMotionManager.authorizationStatus == CMAuthorizationStatusDenied ||
++        CMHeadphoneMotionManager.authorizationStatus == CMAuthorizationStatusRestricted) {
++        // The effect still works as a fixed front/center voice if motion access is unavailable.
++        SGSingDSPSetSpatialAzimuthDegrees(0);
++        return;
++    }
++    if (!_manager) {
++        _manager = [CMHeadphoneMotionManager new];
++        _manager.delegate = self;
++    }
++    [self startMotionUpdates];
++}
++
++- (void)startMotionUpdates {
++    if (!atomic_load_explicit(&_enabled, memory_order_relaxed) || !_manager.isDeviceMotionAvailable) {
++        SGSingDSPSetSpatialAzimuthDegrees(0);
++        return;
++    }
++    __weak typeof(self) weakSelf = self;
++    [_manager startDeviceMotionUpdatesToQueue:_queue withHandler:^(CMDeviceMotion *motion, NSError *error) {
++        [weakSelf consumeMotion:motion error:error];
++    }];
++}
++
++- (double)wrappedAngle:(double)angle {
++    while (angle > M_PI) angle -= 2.0 * M_PI;
++    while (angle < -M_PI) angle += 2.0 * M_PI;
++    return angle;
++}
++
++// Called serially on _queue. The first sample establishes the user's forward direction.
++- (void)consumeMotion:(CMDeviceMotion *)motion error:(NSError *)error {
++    if (!atomic_load_explicit(&_enabled, memory_order_relaxed) || error || !motion) return;
++    double yaw = motion.attitude.yaw;
++    if (!isfinite(yaw)) return;
++    if (!_hasReference) {
++        _referenceYaw = yaw;
++        _hasReference = YES;
++        _turnedAwaySince = 0;
++        SGSingDSPSetSpatialAzimuthDegrees(0);
++        return;
++    }
++
++    double relative = [self wrappedAngle:yaw - _referenceYaw];
++    double now = motion.timestamp;
++    // If the listener keeps looking far away, gradually establish that direction as forward.
++    // This avoids leaving the singer stranded behind the listener for an entire song.
++    if (fabs(relative) > (55.0 * M_PI / 180.0)) {
++        if (_turnedAwaySince == 0) _turnedAwaySince = now;
++        if (now - _turnedAwaySince >= 5.0) {
++            _referenceYaw = yaw;
++            relative = 0;
++            _turnedAwaySince = 0;
++        }
++    } else {
++        _turnedAwaySince = 0;
++    }
++
++    // The singer stays in world space: turning right moves the voice to the listener's left.
++    SGSingDSPSetSpatialAzimuthDegrees((float)(-relative * 180.0 / M_PI));
++}
++
++- (void)headphoneMotionManagerDidDisconnect:(CMHeadphoneMotionManager *)manager {
++    SGSingDSPSetSpatialAzimuthDegrees(0);
++    [_queue addOperationWithBlock:^{ self->_hasReference = NO; self->_turnedAwaySince = 0; }];
++}
++
++- (void)headphoneMotionManagerDidConnect:(CMHeadphoneMotionManager *)manager {
++    // The motion update handler will establish a fresh forward reference on its next sample.
++    [_queue addOperationWithBlock:^{ self->_hasReference = NO; }];
++    dispatch_async(dispatch_get_main_queue(), ^{ [self startMotionUpdates]; });
++}
++@end
++
++void SGSpatialVoiceMotionSetEnabled(BOOL enabled) {
++    [[SGSpatialVoiceMotion shared] setEnabled:enabled];
++}

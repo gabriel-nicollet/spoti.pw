@@ -5,9 +5,19 @@
 static const double kLevelRampSeconds = 0.030;
 static const double kBypassRampSeconds = 0.120;
 static atomic_bool sg_spatialVoice = false;
+static atomic_int sg_spatialAzimuthMilliDegrees = 0;
 
-void SGSingDSPSetSpatialVoice(bool enabled) { atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed); }
+void SGSingDSPSetSpatialVoice(bool enabled) {
+    atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed);
+    if (!enabled) atomic_store_explicit(&sg_spatialAzimuthMilliDegrees, 0, memory_order_relaxed);
+}
 bool SGSingDSPSpatialVoice(void) { return atomic_load_explicit(&sg_spatialVoice, memory_order_relaxed); }
+void SGSingDSPSetSpatialAzimuthDegrees(float degrees) {
+    if (!isfinite(degrees)) degrees = 0;
+    if (degrees < -75.0f) degrees = -75.0f;
+    if (degrees > 75.0f) degrees = 75.0f;
+    atomic_store_explicit(&sg_spatialAzimuthMilliDegrees, (int)lrintf(degrees * 1000.0f), memory_order_relaxed);
+}
 
 static void ramp(SGSingMixer *m,
                  float to,
@@ -95,41 +105,75 @@ void SGSingMixerProcess(SGSingMixer *m,
                         const float *vocals,
                         float *out,
                         uint32_t frames) {
+    const bool spatial = SGSingDSPSpatialVoice();
+    const float targetAzimuth = spatial
+        ? (float)atomic_load_explicit(&sg_spatialAzimuthMilliDegrees, memory_order_relaxed) * (float)(3.14159265358979323846 / 180000.0)
+        : 0.0f;
+    const float azimuthLimit = 1.3090f; // 75 degrees
+    const float alpha = (float)(1.0 - exp(-1.0 / (m->sampleRate * 0.020)));
+    const uint32_t maxITD = (uint32_t)fmin(31.0, m->sampleRate * 0.00065);
+    const uint32_t roomDelayL = (uint32_t)fmin(1023.0, m->sampleRate * 0.013);
+    const uint32_t roomDelayR = (uint32_t)fmin(1023.0, m->sampleRate * 0.019);
+
     for (uint32_t i = 0; i < frames; i++) {
         if (m->remaining) {
             m->gain += m->step;
             m->instrumental += m->instrumentalStep;
-
             if (!--m->remaining) {
                 m->gain = m->targetGain;
                 m->instrumental = m->instrumentalTarget;
             }
         }
 
-        for (unsigned c = 0; c < 2; c++) {
-            size_t at = (size_t)i * 2 + c;
+        float sourceL = isfinite(original[(size_t)i * 2]) ? original[(size_t)i * 2] : 0;
+        float sourceR = isfinite(original[(size_t)i * 2 + 1]) ? original[(size_t)i * 2 + 1] : 0;
+        float vocalL = isfinite(vocals[(size_t)i * 2]) ? vocals[(size_t)i * 2] : 0;
+        float vocalR = isfinite(vocals[(size_t)i * 2 + 1]) ? vocals[(size_t)i * 2 + 1] : 0;
+        float spatialL = vocalL, spatialR = vocalR;
 
-            float source = isfinite(original[at]) ? original[at] : 0;
-            float vocal = isfinite(vocals[at]) ? vocals[at] : 0;
+        if (spatial) {
+            // Smooth head motion to avoid zipper noise. A mono source is panned in the
+            // listener's frame; the short far-ear delay and quiet reflections add depth.
+            m->spatialAzimuth += (targetAzimuth - m->spatialAzimuth) * alpha;
+            if (m->spatialAzimuth < -azimuthLimit) m->spatialAzimuth = -azimuthLimit;
+            if (m->spatialAzimuth > azimuthLimit) m->spatialAzimuth = azimuthLimit;
+            float mono = 0.5f * (vocalL + vocalR) * 0.84f; // slightly farther than dry/center
+            float pan = sinf(m->spatialAzimuth) / sinf(azimuthLimit);
+            if (pan < -1) pan = -1;
+            if (pan > 1) pan = 1;
+            float dryL = mono * sqrtf(0.5f * (1.0f - pan));
+            float dryR = mono * sqrtf(0.5f * (1.0f + pan));
 
-            if (SGSingDSPSpatialVoice()) {
-                size_t leftAt = (size_t)i * 2;
-                size_t rightAt = leftAt + 1;
-                float left = isfinite(vocals[leftAt]) ? vocals[leftAt] : 0;
-                float right = isfinite(vocals[rightAt]) ? vocals[rightAt] : 0;
-                // The separated vocal stem is often already narrow. Keep only its mid channel
-                // so Spatial Voice produces a deterministic front/center vocal instead of an
-                // almost inaudible 75% side reduction.
-                float mid = 0.5f * (left + right);
-                vocal = mid;
-            }
+            uint32_t delayL = m->spatialAzimuth > 0 ? maxITD : 0;
+            uint32_t delayR = m->spatialAzimuth < 0 ? maxITD : 0;
+            uint32_t write = m->spatialITDIndex;
+            m->spatialITD[write] = mono;
+            uint32_t readL = (write + 64 - delayL) & 63;
+            uint32_t readR = (write + 64 - delayR) & 63;
+            float delayedL = m->spatialITD[readL];
+            float delayedR = m->spatialITD[readR];
+            m->spatialITDIndex = (write + 1) & 63;
+            // Blend the delayed far ear very lightly so localization stays stable.
+            if (delayL) dryL = dryL * 0.92f + delayedL * sqrtf(0.5f * (1.0f - pan)) * 0.08f;
+            if (delayR) dryR = dryR * 0.92f + delayedR * sqrtf(0.5f * (1.0f + pan)) * 0.08f;
 
-            // instrumental = original - vocal
-            float value =
-                m->instrumental * (source - vocal)
-                + m->gain * vocal;
-
-            out[at] = fmaxf(-1, fminf(1, value));
+            uint32_t roomAt = m->spatialRoomIndex;
+            uint32_t tapL = (roomAt + 1024 - roomDelayL) & 1023;
+            uint32_t tapR = (roomAt + 1024 - roomDelayR) & 1023;
+            float reflectionL = m->spatialRoomL[tapL];
+            float reflectionR = m->spatialRoomR[tapR];
+            m->spatialRoomL[roomAt] = dryL + reflectionL * 0.18f;
+            m->spatialRoomR[roomAt] = dryR + reflectionR * 0.18f;
+            m->spatialRoomIndex = (roomAt + 1) & 1023;
+            spatialL = dryL + reflectionL * 0.14f;
+            spatialR = dryR + reflectionR * 0.14f;
         }
+
+        // Remove the original separated vocal per channel, then add the processed vocal.
+        // This keeps the instrumental's stereo image intact instead of centering its side signal.
+        float valueL = m->instrumental * (sourceL - vocalL) + m->gain * spatialL;
+        float valueR = m->instrumental * (sourceR - vocalR) + m->gain * spatialR;
+        out[(size_t)i * 2] = fmaxf(-1, fminf(1, valueL));
+        out[(size_t)i * 2 + 1] = fmaxf(-1, fminf(1, valueR));
     }
 }

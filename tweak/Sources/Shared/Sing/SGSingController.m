@@ -4,6 +4,7 @@
 #import "SGSingFormat.h"
 #import "SGSingModel.h"
 #import "SGSingDSP.h"
+#import "SGSpatialVoiceMotion.h"
 #import "SGStemWorker.h"
 #import "Shared/Audio/SGAudioPipeline.h"
 #import "Shared/Player/PlayerState.h"
@@ -476,6 +477,7 @@ void SGSingSetVocalsOnly(BOOL vocalsOnly) {
 BOOL SGSingSpatialVoice(void) { return SGSingDSPSpatialVoice(); }
 void SGSingSetSpatialVoice(BOOL enabled) {
     SGSingDSPSetSpatialVoice(enabled);
+    SGSpatialVoiceMotionSetEnabled(enabled);
     [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
 }
 void SGSingSetEnabled(BOOL enabled) {

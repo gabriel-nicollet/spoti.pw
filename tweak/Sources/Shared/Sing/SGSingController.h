@@ -25,8 +25,8 @@ void SGSingSetVocalLevel(float level);
 // still decides whether it runs; this changes what it plays. Safe before Sing is configured.
 BOOL SGSingVocalsOnly(void);
 void SGSingSetVocalsOnly(BOOL vocalsOnly);
-// Spatial Voice focuses the separated vocal stem in the center/front image while leaving
-// the existing 0-110% Sing level mapping unchanged.
+// Spatial Voice head-tracks the separated vocal stem when compatible headphone motion is
+// available; without it, the voice stays front/center. The 0-110% Sing mapping is unchanged.
 BOOL SGSingSpatialVoice(void);
 void SGSingSetSpatialVoice(BOOL enabled);
 void SGSingSetEnabled(BOOL enabled);

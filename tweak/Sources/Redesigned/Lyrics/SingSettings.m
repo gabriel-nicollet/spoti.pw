@@ -112,8 +112,8 @@ static SGModSection *karaokeSection(void) {
     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
     SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep the vocals focused in front", SGRKeySingSpatialVoice);
-    spatial.info = @"Centers the separated vocal stem while retaining a small amount of stereo ambience. "
-                   @"The instrumental is left untouched, and the Sing slider still controls the mix from 0 to 110 percent.";
+    spatial.info = @"Keeps the separated singer in front as you turn your head, when compatible headphone motion is available. "
+                   @"Adds subtle distance and room reflections; the instrumental stereo image is preserved, and the Sing slider still controls the mix from 0 to 110 percent.";
     spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); };
     SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
     model.progress = ^double {
