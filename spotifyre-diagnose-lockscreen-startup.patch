@@ -1,0 +1,33 @@
+--- a/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
++++ b/tweak/Sources/Shared/LockScreenLyrics/LockScreenLyrics.x
+@@ -12,6 +12,9 @@
+ #import "Shared/Sing/SGSingController.h"
+ #import "Shared/Player/PlayerState.h"
+ 
++// Temporary diagnostic switch: bypass custom lock-screen metadata interception to isolate launch hangs.
++#define SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH 1
++
+ static const NSTimeInterval kTick = 0.25;
+ // Past a line's sung end by this much, with the next line at least this far off, the artist comes back.
+ static const NSInteger kBreakMs = 4000;
+@@ -171,6 +174,10 @@
+ 
+ %hook MPNowPlayingInfoCenter
+ - (void)setNowPlayingInfo:(NSDictionary *)info {
++#if SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH
++    %orig;
++    return;
++#endif
+     if (sg_resending) {
+         %orig;
+         return;
+@@ -213,6 +220,9 @@
+ }
+ 
+ - (NSDictionary *)nowPlayingInfo {
++#if SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH
++    return %orig;
++#endif
+     NSDictionary *info;
+     @synchronized (sg_lock) {
+         info = sg_spotifyInfo;
