@@ -38,7 +38,8 @@ public final class SGRLyricsTranslator: NSObject {
                     for index in 0..<parsed.count { output[start + index] = parsed[index] }
                     start = end
                 }
-                await MainActor.run { completion(output, nil) }
+                let completedOutput = output
+                await MainActor.run { completion(completedOutput, nil) }
             } catch {
                 await MainActor.run { completion(nil, error as NSError) }
             }

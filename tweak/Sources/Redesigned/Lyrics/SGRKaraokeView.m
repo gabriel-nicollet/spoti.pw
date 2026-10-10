@@ -15,6 +15,7 @@
 #import "Shared/Player/PlayerEvents.h"
 #import "Shared/Haptics/Haptics.h"
 #import "Redesigned/Kit/SGRTokens.h"
+#import "Settings/SGPageStyle.h"
 #import <objc/message.h>
 
 static const CGFloat kMargin = 24, kRowTighten = 2;
