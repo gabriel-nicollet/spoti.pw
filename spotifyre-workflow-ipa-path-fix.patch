@@ -1,0 +1,16 @@
+diff --git a/.github/workflows/build-ipa.yml b/.github/workflows/build-ipa.yml
+index 00ba975..338fb9a 100644
+--- a/.github/workflows/build-ipa.yml
++++ b/.github/workflows/build-ipa.yml
+@@ -45,7 +45,10 @@ jobs:
+           curl -fsSL "${{ inputs.ipa_url }}" -o ipa/spotify.ipa
+           case "$(file --mime-type -b ipa/spotify.ipa)" in application/zip|application/x-ios-app) ;; *) echo "::error::Not an IPA"; exit 1 ;; esac
+ 
+-      - run: make release
++      - name: Build release IPA
++        run: |
++          test -s ipa/spotify.ipa || { echo "::error::Downloaded IPA is missing or empty"; exit 1; }
++          make release IPA=ipa/spotify.ipa
+ 
+       - uses: actions/upload-artifact@v5
+         if: inputs.upload_method != 'filebin'
